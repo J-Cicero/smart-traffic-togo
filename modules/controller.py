@@ -1,24 +1,30 @@
-"""Traffic light state machine and safety enforcement."""
+# modules/controller.py - Gestion de la machine a etats et securite des feux
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-from enum import Enum, auto
-
-
-class LightState(Enum):
-    RED = auto()
-    GREEN = auto()
-    YELLOW = auto()
+import time
+from config import TIME_LIMITS, FAILSAFE_CONFIG
+from modules.calculator import calculate_green_light_duration
 
 
-@dataclass
-class TrafficController:
-    current_state: LightState = LightState.RED
+def run_traffic_cycle(lane_name: str, vehicle_counts: dict, camera_active: bool = True) -> int:
+    """
+    Determine la duree securisee du feu vert pour une voie donnee,
+    en integrant la verification des limites et le mode de repli (Fail-Safe).
+    """
+    # 1. Verification du mode de repli (Securite en cas de panne de la camera ou de l'IA)
+    if not camera_active:
+        print(f"[ALERTE] Camera ou IA hors service sur la voie {lane_name}. Application du mode Fail-Safe.")
+        if FAILSAFE_CONFIG["fallback_action"] == "fixed_timer":
+            return FAILSAFE_CONFIG["default_duration"]
+        return TIME_LIMITS["T_MIN"]  # Repli minimal par defaut
 
-    def transition_to(self, next_state: LightState) -> None:
-        self.current_state = next_state
+    try:
+        # 2. Calcul normal de la duree via le moteur PCU et les seuils
+        green_duration = calculate_green_light_duration(vehicle_counts)
+        print(f"[INFO] Voie {lane_name} - Vehicules detectes : {vehicle_counts}")
+        print(f"[INFO] Duree du feu vert allouee : {green_duration} secondes")
+        return green_duration
 
-    def safe_cycle(self) -> list[LightState]:
-        """Return a default safe order for a single traffic cycle."""
-        return [LightState.GREEN, LightState.YELLOW, LightState.RED]
+    except Exception as e:
+        # 3. En cas d'erreur de calcul inattendue, application d'un repli securise
+        print(f"[ERREUR] Echec du calcul pour la voie {lane_name} : {e}")
+        return TIME_LIMITS["T_MIN"]
