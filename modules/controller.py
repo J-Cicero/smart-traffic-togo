@@ -1,30 +1,51 @@
-# modules/controller.py - Gestion de la machine a etats et securite des feux
+# modules/controller.py - Gestion de la machine a etats, securite et priorites
 
-import time
-from config import TIME_LIMITS, FAILSAFE_CONFIG
+from config import FAILSAFE_CONFIG, TIME_LIMITS
 from modules.calculator import calculate_green_light_duration
 
 
-def run_traffic_cycle(lane_name: str, vehicle_counts: dict, camera_active: bool = True) -> int:
+def run_traffic_cycle(
+    lane_name: str,
+    vehicle_counts: dict,
+    camera_active: bool = True,
+    previous_load: float | None = None,
+) -> tuple[int, dict]:
     """
-    Determine la duree securisee du feu vert pour une voie donnee,
-    en integrant la verification des limites et le mode de repli (Fail-Safe).
+    Determine la duree securisee du feu vert pour une voie/axe donnee.
+    Integre le mode Fail-Safe, la priorite d'urgence et l'encadrement strict.
+    Retourne (duree_secondes, info_dict).
     """
-    # 1. Verification du mode de repli (Securite en cas de panne de la camera ou de l'IA)
+    # 1. Mode Fail-Safe (secours en cas de panne camera ou IA)
     if not camera_active:
-        print(f"[ALERTE] Camera ou IA hors service sur la voie {lane_name}. Application du mode Fail-Safe.")
-        if FAILSAFE_CONFIG["fallback_action"] == "fixed_timer":
-            return FAILSAFE_CONFIG["default_duration"]
-        return TIME_LIMITS["T_MIN"]  # Repli minimal par defaut
+        action = FAILSAFE_CONFIG.get("fallback_action", "fixed_timer")
+        duration = FAILSAFE_CONFIG.get("default_duration", 30) if action == "fixed_timer" else TIME_LIMITS["T_MIN"]
+        print(f"[ALERTE FAILSAFE] Defaut camera/IA sur {lane_name}. Application duree secours: {duration}s.")
+        return duration, {
+            "is_failsafe": True,
+            "is_emergency": False,
+            "applied_rule": "FAILSAFE_FALLBACK",
+            "charge_score": 0.0,
+        }
 
     try:
-        # 2. Calcul normal de la duree via le moteur PCU et les seuils
-        green_duration = calculate_green_light_duration(vehicle_counts)
-        print(f"[INFO] Voie {lane_name} - Vehicules detectes : {vehicle_counts}")
-        print(f"[INFO] Duree du feu vert allouee : {green_duration} secondes")
-        return green_duration
+        # 2. Calcul dynamique via le moteur PCU / urgence
+        duration, meta = calculate_green_light_duration(vehicle_counts, previous_load=previous_load, use_smoothing=True)
+        meta["is_failsafe"] = False
+
+        if meta.get("is_emergency"):
+            print(f"[URGENCE PREEMPTION] Vehicule d'urgence detecte sur {lane_name}! Feu vert prioritaire: {duration}s")
+        else:
+            print(f"[INFO CONTROL] {lane_name} - Charge PCU: {meta['charge_score']} | Duree allouee: {duration}s")
+
+        return duration, meta
 
     except Exception as e:
-        # 3. En cas d'erreur de calcul inattendue, application d'un repli securise
-        print(f"[ERREUR] Echec du calcul pour la voie {lane_name} : {e}")
-        return TIME_LIMITS["T_MIN"]
+        # 3. Repli de secours universel en cas d'erreur logicielle imprevue
+        print(f"[ERREUR CRITIQUE] Echec du controleur sur {lane_name} ({e}). Reprise securisee minimal {TIME_LIMITS['T_MIN']}s.")
+        return TIME_LIMITS["T_MIN"], {
+            "is_failsafe": True,
+            "is_emergency": False,
+            "applied_rule": "CRITICAL_EXCEPTIONAL_FALLBACK",
+            "charge_score": 0.0,
+            "error": str(e),
+        }

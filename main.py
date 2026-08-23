@@ -3,9 +3,11 @@
 import os
 import time
 
-from config import TIME_LIMITS
+from config import SERVER_CONFIG, TIME_LIMITS
+from modules.api import GLOBAL_STATE, start_api_server_background
 from modules.controller import run_traffic_cycle
 from modules.detector import detect_and_count_vehicles, load_yolo_model
+from modules.logger import TrafficLogger
 
 try:
     import cv2
@@ -25,6 +27,7 @@ VEHICLE_CLASSES = [
     "minibus",
     "bus",
     "camion",
+    "urgence",
 ]
 
 AXIS_LANES = {
@@ -32,7 +35,6 @@ AXIS_LANES = {
     "Axe Est-Ouest": ("Voie Est", "Voie Ouest"),
 }
 
-# Sources video par voie (index webcam locale ou URL/chemin de flux).
 CAMERA_SOURCES = {
     "Voie Nord": 0,
     "Voie Sud": 1,
@@ -40,22 +42,19 @@ CAMERA_SOURCES = {
     "Voie Ouest": 3,
 }
 
-# Repli simulation: arrivees par seconde si la vision est indisponible sur une voie.
 ARRIVAL_PER_SECOND = {
     "Voie Nord": {"moto": 1, "tricycle_passager": 1, "voiture": 1},
-    "Voie Sud": {"moto": 2, "tricycle_passager": 1, "voiture": 1, "camion": 1},
+    "Voie Sud": {"moto": 2, "tricycle_passager": 1, "tricycle_cargo": 1, "voiture": 1, "camion": 1},
     "Voie Est": {"moto": 1, "voiture": 1},
     "Voie Ouest": {"moto": 1, "tricycle_cargo": 1, "voiture": 1},
 }
 
 
 def empty_vehicle_counts() -> dict:
-    """Construit un dictionnaire de comptage initialise a zero."""
     return {vehicle_class: 0 for vehicle_class in VEHICLE_CLASSES}
 
 
 def create_empty_observation_buffer() -> dict:
-    """Initialise le buffer d'observation par voie (utilise pendant les phases rouges)."""
     return {
         "Voie Nord": empty_vehicle_counts(),
         "Voie Sud": empty_vehicle_counts(),
@@ -65,7 +64,6 @@ def create_empty_observation_buffer() -> dict:
 
 
 def aggregate_axis_counts(first_lane_counts: dict, second_lane_counts: dict) -> dict:
-    """Fusionne les comptages de deux voies d'un meme axe (Nord-Sud ou Est-Ouest)."""
     axis_counts: dict = {}
     all_classes = set(first_lane_counts) | set(second_lane_counts)
     for vehicle_class in all_classes:
@@ -74,7 +72,6 @@ def aggregate_axis_counts(first_lane_counts: dict, second_lane_counts: dict) -> 
 
 
 def create_vision_context() -> dict:
-    """Initialise YOLO et les captures camera avec mode repli automatique."""
     context = {
         "model": None,
         "captures": {},
@@ -86,15 +83,12 @@ def create_vision_context() -> dict:
         return context
 
     if not os.path.exists(MODEL_PATH):
-        print(
-            f"[WARN] Modele YOLO introuvable ({MODEL_PATH}). "
-            "Placez un fichier local puis relancez pour activer la vision."
-        )
+        print(f"[WARN] Modele YOLO introuvable ({MODEL_PATH}). Mode observation simulee active.")
         return context
 
     try:
         context["model"] = load_yolo_model(MODEL_PATH)
-        print(f"[INFO] Modele YOLO charge: {MODEL_PATH}")
+        print(f"[INFO] Modele YOLO charge avec succes: {MODEL_PATH}")
     except Exception as exc:
         print(f"[WARN] Chargement YOLO impossible ({exc}). Bascule en observation simulee.")
         return context
@@ -113,7 +107,6 @@ def create_vision_context() -> dict:
 
 
 def release_vision_context(context: dict) -> None:
-    """Libere proprement les ressources camera en fin d'execution."""
     for capture in context.get("captures", {}).values():
         try:
             capture.release()
@@ -122,7 +115,6 @@ def release_vision_context(context: dict) -> None:
 
 
 def normalize_counts(raw_counts: dict) -> dict:
-    """Garantit la presence des classes attendues avec valeurs entieres non negatives."""
     normalized = empty_vehicle_counts()
     for vehicle_class in VEHICLE_CLASSES:
         normalized[vehicle_class] = max(0, int(raw_counts.get(vehicle_class, 0)))
@@ -130,7 +122,6 @@ def normalize_counts(raw_counts: dict) -> dict:
 
 
 def observe_lane_from_camera(lane: str, context: dict) -> dict | None:
-    """Retourne un snapshot de comptage pour une voie via camera+YOLO, sinon None."""
     model = context.get("model")
     capture = context.get("captures", {}).get(lane)
     lane_is_available = context.get("camera_ok", {}).get(lane, False)
@@ -140,21 +131,20 @@ def observe_lane_from_camera(lane: str, context: dict) -> dict | None:
     ok, frame = capture.read()
     if not ok:
         context["camera_ok"][lane] = False
-        print(f"[WARN] Lecture camera echouee sur {lane}. Passage en mode repli simulation pour cette voie.")
+        print(f"[WARN] Lecture camera echouee sur {lane}. Repli simulation.")
         return None
 
     try:
-        detected = detect_and_count_vehicles(frame, model)
+        detected = detect_and_count_vehicles(frame, model, lane_name=lane)
     except Exception as exc:
         context["camera_ok"][lane] = False
-        print(f"[WARN] Inference YOLO echouee sur {lane} ({exc}). Repli simulation pour cette voie.")
+        print(f"[WARN] Inference YOLO echouee sur {lane} ({exc}). Repli simulation.")
         return None
 
     return normalize_counts(detected)
 
 
 def accumulate_simulated_arrivals(observed_counts: dict, lanes_to_observe: tuple[str, ...]) -> None:
-    """Ajoute des arrivees simulees par seconde (repli si camera indisponible)."""
     for lane in lanes_to_observe:
         arrivals = ARRIVAL_PER_SECOND.get(lane, {})
         for vehicle_class, amount in arrivals.items():
@@ -162,7 +152,6 @@ def accumulate_simulated_arrivals(observed_counts: dict, lanes_to_observe: tuple
 
 
 def merge_snapshot_into_queue(observed_counts: dict, lane: str, snapshot_counts: dict) -> None:
-    """Met a jour la file observee: on garde le max pour eviter le double comptage brut frame-a-frame."""
     for vehicle_class in VEHICLE_CLASSES:
         observed_counts[lane][vehicle_class] = max(
             observed_counts[lane][vehicle_class],
@@ -171,7 +160,6 @@ def merge_snapshot_into_queue(observed_counts: dict, lane: str, snapshot_counts:
 
 
 def observe_red_lanes(observed_counts: dict, lanes_to_observe: tuple[str, ...], context: dict) -> None:
-    """Observe les voies au rouge via YOLO; si indisponible, bascule sur la simulation pour la voie concernee."""
     for lane in lanes_to_observe:
         snapshot = observe_lane_from_camera(lane, context)
         if snapshot is None:
@@ -181,20 +169,24 @@ def observe_red_lanes(observed_counts: dict, lanes_to_observe: tuple[str, ...], 
 
 
 def clear_axis_buffer(observed_counts: dict, axis_lanes: tuple[str, str]) -> None:
-    """Remet a zero les compteurs de l'axe qui vient d'obtenir son feu vert."""
     lane_a, lane_b = axis_lanes
     observed_counts[lane_a] = empty_vehicle_counts()
     observed_counts[lane_b] = empty_vehicle_counts()
 
 
 def is_axis_camera_active(axis_name: str, context: dict) -> bool:
-    """Retourne True si les deux voies de l'axe sont actuellement observables par camera+YOLO."""
     lane_a, lane_b = AXIS_LANES[axis_name]
     return context.get("model") is not None and context.get("camera_ok", {}).get(lane_a, False) and context.get("camera_ok", {}).get(lane_b, False)
 
 
-def run_green_phase(active_axis_name: str, opposite_axis_name: str, observed_counts: dict, context: dict) -> None:
-    """Execute une phase verte d'axe et observe en continu l'axe oppose (au rouge)."""
+def run_green_phase(
+    active_axis_name: str,
+    opposite_axis_name: str,
+    observed_counts: dict,
+    context: dict,
+    logger: TrafficLogger,
+    axis_previous_loads: dict,
+) -> None:
     active_lanes = AXIS_LANES[active_axis_name]
     opposite_lanes = AXIS_LANES[opposite_axis_name]
 
@@ -204,25 +196,31 @@ def run_green_phase(active_axis_name: str, opposite_axis_name: str, observed_cou
     )
 
     camera_active = is_axis_camera_active(active_axis_name, context)
-    green_duration = run_traffic_cycle(
+    prev_load = axis_previous_loads.get(active_axis_name)
+
+    green_duration, meta = run_traffic_cycle(
         lane_name=active_axis_name,
         vehicle_counts=active_axis_counts,
         camera_active=camera_active,
+        previous_load=prev_load,
     )
+
+    axis_previous_loads[active_axis_name] = meta.get("charge_score", 0.0)
 
     print("\n============================================================")
     print(f"[PHASE VERTE] Axe actif: {active_axis_name}")
     print(f"[ETAT FEUX] {active_lanes[0]}=VERT | {active_lanes[1]}=VERT")
     print(f"[ETAT FEUX] {opposite_lanes[0]}=ROUGE | {opposite_lanes[1]}=ROUGE")
     print(f"[COMPTAGES AXE ACTIF] {active_axis_name}: {active_axis_counts}")
-    print(
-        f"[DUREE VERTE] {active_axis_name}: {green_duration}s "
-        f"(bornes config: T_MIN={TIME_LIMITS['T_MIN']}s, T_MAX={TIME_LIMITS['T_MAX']}s)"
-    )
-    if not camera_active:
-        print(f"[FAILSAFE] Vision indisponible sur {active_axis_name}. Duree de repli appliquee.")
+    print(f"[DUREE VERTE] {active_axis_name}: {green_duration}s (Regle: {meta.get('applied_rule')})")
 
-    # L'axe qui passe au vert vide sa file; l'observation repart de zero pour son prochain tour rouge.
+    logger.log_event("GREEN_PHASE_START", {
+        "active_axis": active_axis_name,
+        "duration": green_duration,
+        "counts": active_axis_counts,
+        "meta": meta,
+    })
+
     clear_axis_buffer(observed_counts, active_lanes)
 
     for remaining in range(green_duration, 0, -1):
@@ -231,6 +229,16 @@ def run_green_phase(active_axis_name: str, opposite_axis_name: str, observed_cou
             observed_counts[opposite_lanes[0]],
             observed_counts[opposite_lanes[1]],
         )
+
+        GLOBAL_STATE.update_state(
+            active_axis=active_axis_name,
+            phase="VERT",
+            remaining_seconds=remaining,
+            observed_counts=observed_counts,
+            lane_camera_ok=context.get("camera_ok", {}),
+            last_cycle_metadata=meta,
+        )
+
         print(
             f"[VERT {active_axis_name}] restant={remaining:02d}s | "
             f"[OBSERVATION {opposite_axis_name}] charge en attente: {pending_opposite}"
@@ -238,33 +246,49 @@ def run_green_phase(active_axis_name: str, opposite_axis_name: str, observed_cou
         time.sleep(1)
 
 
-def run_transition_phase(active_axis_name: str, opposite_axis_name: str, observed_counts: dict, context: dict) -> None:
-    """Applique la transition de securite et continue l'observation des axes au rouge."""
+def run_transition_phase(
+    active_axis_name: str,
+    opposite_axis_name: str,
+    observed_counts: dict,
+    context: dict,
+    logger: TrafficLogger,
+) -> None:
     active_lanes = AXIS_LANES[active_axis_name]
     opposite_lanes = AXIS_LANES[opposite_axis_name]
     all_lanes = active_lanes + opposite_lanes
 
     print("\n------------------------------------------------------------")
     print(f"[TRANSITION] Fin de {active_axis_name}: passage au JAUNE")
-    print(f"[ETAT FEUX] {active_lanes[0]}=JAUNE | {active_lanes[1]}=JAUNE")
-    print(f"[ETAT FEUX] {opposite_lanes[0]}=ROUGE | {opposite_lanes[1]}=ROUGE")
+
+    logger.log_event("YELLOW_PHASE", {"axis": active_axis_name, "duration": YELLOW_SECONDS})
 
     for remaining in range(YELLOW_SECONDS, 0, -1):
         observe_red_lanes(observed_counts, opposite_lanes, context)
+        GLOBAL_STATE.update_state(
+            active_axis=active_axis_name,
+            phase="JAUNE",
+            remaining_seconds=remaining,
+            observed_counts=observed_counts,
+        )
         print(f"[JAUNE {active_axis_name}] restant={remaining:02d}s")
         time.sleep(1)
 
     print("[SECURITE] Tous au ROUGE pour degager integralement le carrefour")
-    print("[ETAT FEUX] NORD=ROUGE | SUD=ROUGE | EST=ROUGE | OUEST=ROUGE")
+    logger.log_event("ALL_RED_PHASE", {"duration": ALL_RED_SECONDS})
 
     for remaining in range(ALL_RED_SECONDS, 0, -1):
         observe_red_lanes(observed_counts, all_lanes, context)
+        GLOBAL_STATE.update_state(
+            active_axis="AUCUN (SECURITE)",
+            phase="TOUS_ROUGE",
+            remaining_seconds=remaining,
+            observed_counts=observed_counts,
+        )
         print(f"[TOUS ROUGE] restant={remaining:02d}s")
         time.sleep(1)
 
 
 def bootstrap_initial_observation(observed_counts: dict) -> None:
-    """Charge initiale pour eviter un premier cycle artificiellement vide."""
     observed_counts["Voie Nord"].update({"moto": 10, "tricycle_passager": 4, "voiture": 5, "camion": 1})
     observed_counts["Voie Sud"].update({"moto": 14, "tricycle_passager": 3, "tricycle_cargo": 2, "voiture": 6, "bus": 1, "camion": 1})
     observed_counts["Voie Est"].update({"moto": 7, "tricycle_passager": 2, "voiture": 4, "camion": 1})
@@ -273,28 +297,35 @@ def bootstrap_initial_observation(observed_counts: dict) -> None:
 
 def main() -> None:
     print("=== Demarrage du systeme de regulation intelligente - Smart Traffic Lome ===")
-    print("Mode de controle: phases synchronisees + observation croisee en continu")
+    print("Mode de controle: Backend avance avec priorite d'urgence, ROI, lissage, API & audit logs.")
+
+    logger = TrafficLogger()
+    logger.log_event("SYSTEM_BOOT", {"status": "INITIALIZING"})
+
+    if SERVER_CONFIG.get("ENABLE_API"):
+        start_api_server_background(
+            host=SERVER_CONFIG.get("HOST", "0.0.0.0"),
+            port=SERVER_CONFIG.get("PORT", 8080),
+        )
 
     observed_counts = create_empty_observation_buffer()
     bootstrap_initial_observation(observed_counts)
     vision_context = create_vision_context()
+    axis_previous_loads = {}
 
     try:
         while True:
-            # Phase 1: Axe Nord-Sud au vert, Axe Est-Ouest observe au rouge.
-            run_green_phase("Axe Nord-Sud", "Axe Est-Ouest", observed_counts, vision_context)
+            # Phase 1: Axe Nord-Sud
+            run_green_phase("Axe Nord-Sud", "Axe Est-Ouest", observed_counts, vision_context, logger, axis_previous_loads)
+            run_transition_phase("Axe Nord-Sud", "Axe Est-Ouest", observed_counts, vision_context, logger)
 
-            # Phase 2: Transition de securite, l'axe oppose continue a etre observe.
-            run_transition_phase("Axe Nord-Sud", "Axe Est-Ouest", observed_counts, vision_context)
-
-            # Phase 3: Axe Est-Ouest au vert, Axe Nord-Sud observe au rouge.
-            run_green_phase("Axe Est-Ouest", "Axe Nord-Sud", observed_counts, vision_context)
-
-            # Phase 4: Transition de securite, puis on reboucle.
-            run_transition_phase("Axe Est-Ouest", "Axe Nord-Sud", observed_counts, vision_context)
+            # Phase 2: Axe Est-Ouest
+            run_green_phase("Axe Est-Ouest", "Axe Nord-Sud", observed_counts, vision_context, logger, axis_previous_loads)
+            run_transition_phase("Axe Est-Ouest", "Axe Nord-Sud", observed_counts, vision_context, logger)
 
     except KeyboardInterrupt:
         print("\n[INFO] Arret securise du systeme demande par l'operateur.")
+        logger.log_event("SYSTEM_SHUTDOWN", {"reason": "KEYBOARD_INTERRUPT"})
     finally:
         release_vision_context(vision_context)
 
