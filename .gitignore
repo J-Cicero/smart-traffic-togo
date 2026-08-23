@@ -40,7 +40,3 @@ Thumbs.db
 # Local environment files
 .env
 .env.*
-
-# Project runtime data
-traffic_events.jsonl
-*.pt

@@ -45,8 +45,12 @@ class IntersectionStateStore:
         with self._lock:
             self.manual_override = override_command
 
-    def pop_override(() -> dict | None:
-        pass
+    def pop_override(self) -> dict | None:
+        with self._lock:
+            override = self.manual_override
+            self.manual_override = None
+            return override
+
 
 
 GLOBAL_STATE = IntersectionStateStore()

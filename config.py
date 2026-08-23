@@ -14,11 +14,64 @@ PCU_WEIGHTS = {
 EMERGENCY_CLASSES = ["ambulance", "pompier", "police", "urgence"]
 EMERGENCY_GREEN_TIME = 25  # Duree prioritaire d'urgence (secondes)
 
-# Parametres de vision
+# Configuration de la topologie du carrefour (3 voies en T ou 4 voies en croix)
+INTERSECTION_TYPE = "4_WAY_CROSS"  # Options : "4_WAY_CROSS" ou "3_WAY_T"
+
+TOPOLOGY_CONFIGS = {
+    "4_WAY_CROSS": {
+        "name": "Carrefour en Croix (4 voies)",
+        "lanes": ["Voie Nord", "Voie Sud", "Voie Est", "Voie Ouest"],
+        "phases": [
+            {
+                "phase_id": "phase_nord_sud",
+                "name": "Axe Nord-Sud",
+                "green_lanes": ["Voie Nord", "Voie Sud"],
+                "red_lanes": ["Voie Est", "Voie Ouest"],
+            },
+            {
+                "phase_id": "phase_est_ouest",
+                "name": "Axe Est-Ouest",
+                "green_lanes": ["Voie Est", "Voie Ouest"],
+                "red_lanes": ["Voie Nord", "Voie Sud"],
+            },
+        ],
+    },
+    "3_WAY_T": {
+        "name": "Intersection en T (3 voies)",
+        "lanes": ["Voie Nord", "Voie Sud", "Voie Est"],
+        "phases": [
+            {
+                "phase_id": "phase_axe_principal",
+                "name": "Axe Principal (Nord-Sud)",
+                "green_lanes": ["Voie Nord", "Voie Sud"],
+                "red_lanes": ["Voie Est"],
+            },
+            {
+                "phase_id": "phase_voie_secondaire",
+                "name": "Insertion Voie Secondaire (Est)",
+                "green_lanes": ["Voie Est"],
+                "red_lanes": ["Voie Nord", "Voie Sud"],
+            },
+        ],
+    },
+}
+
+# Parametres de vision et de flux video
 VISION_CONFIG = {
     "CONF_THRESHOLD": 0.35,  # Seuil minimal de confiance YOLO
     "ENABLE_TRACKING": True,  # Activer le tracking simple
+    "ENABLE_GUI_PREVIEW": False,  # True pour afficher la fenetre OpenCV (si ecran disponible)
 }
+
+# Sources video par voie : dynamique selon la topologie choisie
+CAMERA_SOURCES = {
+    "Voie Nord": "test_traffic.mp4",
+    "Voie Sud": "test_traffic.mp4",
+    "Voie Est": "test_traffic.mp4",
+    "Voie Ouest": "test_traffic.mp4",
+}
+
+
 
 # Zones d'interet (ROI) normalisees [ymin, xmin, ymax, xmax] (0.0 a 1.0)
 # Permet de filtrer uniquement les vehicules dans la zone d'approche de la voie
