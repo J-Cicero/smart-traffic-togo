@@ -15,7 +15,8 @@ EMERGENCY_CLASSES = ["ambulance", "pompier", "police", "urgence"]
 EMERGENCY_GREEN_TIME = 25  # Duree prioritaire d'urgence (secondes)
 
 # Configuration de la topologie du carrefour (3 voies en T ou 4 voies en croix)
-INTERSECTION_TYPE = "4_WAY_CROSS"  # Options : "4_WAY_CROSS" ou "3_WAY_T"
+INTERSECTION_TYPE = "3_WAY_T"  # Options : "4_WAY_CROSS" ou "3_WAY_T"
+
 
 TOPOLOGY_CONFIGS = {
     "4_WAY_CROSS": {
