@@ -53,13 +53,30 @@ def create_empty_observation_buffer(lanes: list[str]) -> dict:
     return {lane: empty_vehicle_counts() for lane in lanes}
 
 
-def aggregate_lane_counts(observed_counts: dict, lane_list: list[str]) -> dict:
-    """Fusionne les comptages d'un groupe de voies (ex: 2 voies pour un axe, ou 1 voie secondaire)."""
+def aggregate_lane_counts(observed_counts: dict, lane_list: list[str], mode: str = "sum") -> dict:
+    """
+    Fusionne les comptages d'un groupe de voies.
+    - mode='sum': Additionne les comptages (utilise pour evaluer les voies rouges cumulées).
+    - mode='max': Prend le MAX par categorie (utilise pour les voies vertes paralleles, car elles s'ecoulent en meme temps).
+    """
     aggregated = empty_vehicle_counts()
-    for lane in lane_list:
-        counts = observed_counts.get(lane, {})
-        for vehicle_class, val in counts.items():
-            aggregated[vehicle_class] += val
+    if not lane_list:
+        return aggregated
+
+    if mode == "max":
+        for vehicle_class in VEHICLE_CLASSES:
+            max_val = 0
+            for lane in lane_list:
+                val = observed_counts.get(lane, {}).get(vehicle_class, 0)
+                if val > max_val:
+                    max_val = val
+            aggregated[vehicle_class] = max_val
+    else:
+        for lane in lane_list:
+            counts = observed_counts.get(lane, {})
+            for vehicle_class, val in counts.items():
+                aggregated[vehicle_class] += val
+
     return aggregated
 
 
@@ -170,10 +187,13 @@ def clear_phase_buffer(observed_counts: dict, green_lanes: list[str]) -> None:
 
 
 def is_phase_camera_active(green_lanes: list[str], context: dict) -> bool:
-    """Verifie si les caméras de toutes les voies vertes de la phase sont fonctionnelles."""
+    """
+    Verifie si au moins une camera de la phase est fonctionnelle.
+    Si 1 camera sur 2 fonctionne, le systeme reste dynamique sur cette voie active.
+    """
     if context.get("model") is None:
         return False
-    return all(context.get("camera_ok", {}).get(lane, False) for lane in green_lanes)
+    return any(context.get("camera_ok", {}).get(lane, False) for lane in green_lanes)
 
 
 def run_phase_green(
@@ -188,7 +208,8 @@ def run_phase_green(
     green_lanes = phase_info["green_lanes"]
     red_lanes = phase_info["red_lanes"]
 
-    active_counts = aggregate_lane_counts(observed_counts, green_lanes)
+    # Utilisation du mode 'max' car les voies vertes d'un meme axe s'ecoulent en parallele
+    active_counts = aggregate_lane_counts(observed_counts, green_lanes, mode="max")
     camera_active = is_phase_camera_active(green_lanes, context)
     prev_load = phase_previous_loads.get(phase_info["phase_id"])
 
@@ -205,7 +226,7 @@ def run_phase_green(
     print(f"[PHASE VERTE] {phase_name} ({', '.join(green_lanes)})")
     print(f"[VOIES VERTES] {', '.join(green_lanes)} = VERT")
     print(f"[VOIES ROUGES] {', '.join(red_lanes)} = ROUGE")
-    print(f"[COMPTAGES VOIES VERTES] {active_counts}")
+    print(f"[COMPTAGES VOIES VERTES (MAX PARALLELE)] {active_counts}")
     print(f"[DUREE VERTE] {green_duration}s (Regle: {meta.get('applied_rule')})")
 
     logger.log_event("GREEN_PHASE_START", {
@@ -221,7 +242,17 @@ def run_phase_green(
 
     for remaining in range(green_duration, 0, -1):
         observe_red_lanes(observed_counts, red_lanes, context)
-        pending_red_counts = aggregate_lane_counts(observed_counts, red_lanes)
+        pending_red_counts = aggregate_lane_counts(observed_counts, red_lanes, mode="sum")
+
+        # Verification d'urgence dynamique : Interruption si un vehicule d'urgence arrive sur voie rouge
+        if pending_red_counts.get("urgence", 0) > 0:
+            print(f"\n[ALERTE URGENCE] Vehicule d'urgence detecte sur voie rouge ! Interruption de la phase verte en cours.")
+            logger.log_event("EMERGENCY_INTERRUPTION", {
+                "phase": phase_name,
+                "remaining_seconds": remaining,
+                "red_counts": pending_red_counts,
+            })
+            break
 
         GLOBAL_STATE.update_state(
             active_axis=phase_name,

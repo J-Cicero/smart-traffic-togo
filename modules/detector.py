@@ -32,11 +32,30 @@ def is_inside_roi(box_norm: tuple[float, float, float, float], roi: list[float] 
 def map_yolo_class_name(class_name: str) -> str | None:
     """
     Mappe le nom de classe extrait de YOLO vers la taxonomie locale de Lome.
+    Gere aussi bien les labels du modele re-entraine (ex: moto, tricycle_cargo)
+    que les noms COCO standards en fallback (ex: motorcycle, car, bus).
     """
     name = class_name.lower().strip()
 
+    # Match direct avec la taxonomie locale (pour le modele re-entraine)
+    exact_classes = [
+        "urgence",
+        "moto",
+        "tricycle_cargo",
+        "tricycle_passager",
+        "voiture",
+        "minibus",
+        "bus",
+        "camion",
+    ]
+    if name in exact_classes:
+        return name
+
+    # Match d'urgence
     if any(em in name for em in EMERGENCY_CLASSES):
         return "urgence"
+
+    # Fallback COCO / mots-cles
     if "motorcycle" in name or "bike" in name or "scooter" in name:
         return "moto"
     if "tricycle_cargo" in name:
