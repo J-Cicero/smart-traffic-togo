@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
 # Virtual environments
 .venv/
@@ -25,6 +26,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .pyre/
+.cache/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -32,6 +34,9 @@ htmlcov/
 # IDE / editor settings
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS files
 .DS_Store
@@ -41,5 +46,11 @@ Thumbs.db
 .env
 .env.*
 
-# Model weights
+# Local databases & logs
+*.sqlite
+*.db
+*.log
+
+# Model weights & test artifacts
 *.pt
+test_traffic.mp4
