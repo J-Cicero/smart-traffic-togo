@@ -1,22 +1,11 @@
 """
-Service de validation évolutive de la cohérence d'une intersection à entités indépendantes.
+Validateur de cohérence et de topologie pour les intersections.
 
-Double identification et rattachement :
-- Chaque entité possède un identifiant technique `id` (int | None) et un `tracking_id` (UUID).
-- Les associations métier en mémoire reposent sur les identifiants explicites UUID :
-  * `branche.intersection_tracking_id` fait référence à `intersection.tracking_id`
-  * `voie.branche_tracking_id` fait référence à `branche.tracking_id`
-- Les clés étrangères techniques `intersection_id` et `branche_id` sont supportées pour la persistance BDD.
-
-Échelle d'évolution du validateur :
-1. [ACTIF] Validation de l'identité de l'intersection (tracking_id UUID, id technique, nom, description).
-2. [ACTIF] Cohérence de la topologie et des branches indépendantes
-   (tracking_id UUID, rattachement par intersection_tracking_id UUID, >= 3 branches valides,
-   unicité des tracking_id, angles finis 0..360).
-3. [ACTIF] Validité des voies indépendantes
-   (tracking_id UUID, rattachement exclusif aux branches valides par branche_tracking_id UUID,
-   >= 1 voie entièrement valide par branche, unicité globale des tracking_id,
-   nom non vide, direction valide, position >= 1 et unicité de la position par (branche_tracking_id, direction)).
+Règles vérifiées :
+- Identité : nom non vide, description valide, id technique valide et tracking_id UUID.
+- Topologie : >= 3 branches valides rattachées par intersection_tracking_id, angles finis 0..360°.
+- Voies : >= 1 voie entièrement valide par branche, unicité des tracking_id,
+  nom non vide, direction valide, position >= 1 et unicité par (branche_tracking_id, direction).
 """
 
 from __future__ import annotations
@@ -29,13 +18,13 @@ import math
 from typing import TypeGuard
 from uuid import UUID
 
-from app.intersection.exceptions import ErreurValidationIntersection
-from app.intersection.models.topology import (
+from app.intersection.entities import (
     Branche,
     DirectionVoie,
     Intersection,
     Voie,
 )
+from app.intersection.exceptions import ErreurValidationIntersection
 
 NOMBRE_MIN_BRANCHES = 3
 ANGLE_MIN_DEGRES = 0.0
@@ -43,29 +32,21 @@ ANGLE_MAX_DEGRES = 360.0
 
 
 def _normaliser_chaine(valeur: object) -> str | None:
-    """
-    Extrait une chaîne nettoyée (`.strip()`) si et seulement si `valeur` est de type `str`.
-    Retourne `None` si `valeur` n'est pas une chaîne (`int`, `None`, `list`, etc.).
-    """
+    """Extrait une chaîne nettoyée si et seulement si valeur est de type str."""
     if not isinstance(valeur, str):
         return None
     return valeur.strip()
 
 
 def _est_sequence_objets(valeur: object) -> TypeGuard[Sequence[object]]:
-    """
-    Vérifie que `valeur` est une séquence itérable d'objets et non une chaîne ou des octets.
-    """
+    """Vérifie que valeur est une séquence itérable d'objets (hors str/bytes)."""
     return isinstance(valeur, Sequence) and not isinstance(
         valeur, (str, bytes, bytearray)
     )
 
 
 def _est_angle_valide(angle: object) -> bool:
-    """
-    Vérifie qu'un angle est un nombre réel fini (`int` ou `float`, hors `bool`),
-    ni `NaN` ni infini (`inf`, `-inf`), et compris dans [0.0, 360.0].
-    """
+    """Vérifie qu'un angle est un nombre réel fini compris entre 0.0 et 360.0."""
     if isinstance(angle, bool) or not isinstance(angle, (int, float)):
         return False
     valeur = float(angle)
@@ -75,9 +56,7 @@ def _est_angle_valide(angle: object) -> bool:
 
 
 def _est_position_voie_valide(position: object) -> TypeGuard[int]:
-    """
-    Vérifie que la position d'une voie est un entier strictement positif (>= 1), hors `bool`.
-    """
+    """Vérifie que la position d'une voie est un entier strictement positif (>= 1)."""
     return (
         isinstance(position, int)
         and not isinstance(position, bool)
@@ -86,16 +65,12 @@ def _est_position_voie_valide(position: object) -> TypeGuard[int]:
 
 
 def _est_uuid_valide(valeur: object) -> TypeGuard[UUID]:
-    """
-    Vérifie que la valeur est une instance valide de UUID.
-    """
+    """Vérifie que la valeur est une instance valide de UUID."""
     return isinstance(valeur, UUID)
 
 
 def _est_id_technique_valide(valeur: object) -> bool:
-    """
-    Vérifie qu'un identifiant technique de base de données est soit None, soit un entier >= 1 (hors bool).
-    """
+    """Vérifie qu'un id technique est soit None, soit un entier >= 1."""
     if valeur is None:
         return True
     return isinstance(valeur, int) and not isinstance(valeur, bool) and valeur >= 1
@@ -127,12 +102,10 @@ class RapportValidationIntersection:
 
     @property
     def anomalies(self) -> tuple[AnomalieValidationIntersection, ...]:
-        """Retourne toutes les anomalies collectées."""
         return tuple(self._anomalies)
 
     @property
     def erreurs(self) -> tuple[AnomalieValidationIntersection, ...]:
-        """Retourne uniquement les erreurs bloquantes."""
         return tuple(
             anomalie
             for anomalie in self._anomalies
@@ -141,7 +114,6 @@ class RapportValidationIntersection:
 
     @property
     def avertissements(self) -> tuple[AnomalieValidationIntersection, ...]:
-        """Retourne uniquement les avertissements non bloquants."""
         return tuple(
             anomalie
             for anomalie in self._anomalies
@@ -150,16 +122,13 @@ class RapportValidationIntersection:
 
     @property
     def etapes_executees(self) -> tuple[str, ...]:
-        """Retourne la liste ordonnée des étapes de validation réellement exécutées."""
         return tuple(self._etapes_executees)
 
     @property
     def est_valide(self) -> bool:
-        """Indique si l'intersection est valide (aucune erreur bloquante)."""
         return len(self.erreurs) == 0
 
     def enregistrer_etape(self, nom_etape: str) -> None:
-        """Enregistre l'exécution effective d'une étape de validation."""
         self._etapes_executees.append(nom_etape)
 
     def ajouter_erreur(
@@ -168,7 +137,6 @@ class RapportValidationIntersection:
         message: str,
         champ: str | None = None,
     ) -> None:
-        """Ajoute une erreur bloquante au rapport."""
         self._anomalies.append(
             AnomalieValidationIntersection(
                 code=code,
@@ -184,7 +152,6 @@ class RapportValidationIntersection:
         message: str,
         champ: str | None = None,
     ) -> None:
-        """Ajoute un avertissement non bloquant au rapport."""
         self._anomalies.append(
             AnomalieValidationIntersection(
                 code=code,
@@ -195,7 +162,6 @@ class RapportValidationIntersection:
         )
 
     def lever_si_invalide(self) -> None:
-        """Lève une exception de validation si au moins une erreur bloquante est présente."""
         if not self.est_valide:
             details = [f"[{e.code}] {e.message}" for e in self.erreurs]
             raise ErreurValidationIntersection(
@@ -205,11 +171,7 @@ class RapportValidationIntersection:
 
 
 class ValidateurIntersection:
-    """
-    Validateur de cohérence d'intersection pour entités indépendantes.
-    Vérifie l'intégrité de la topologie, le rattachement par tracking_id (UUID),
-    l'exactitude des identifiants techniques et l'unicité stricte des voies.
-    """
+    """Validateur de cohérence d'intersection pour entités indépendantes."""
 
     def valider(
         self,
@@ -217,13 +179,10 @@ class ValidateurIntersection:
         branches: object = (),
         voies: object = (),
     ) -> RapportValidationIntersection:
-        """Point d'entrée principal de validation."""
         rapport = RapportValidationIntersection()
 
-        # Étape 1 : Identité de l'intersection
         intersection_tracking_id_valide = self._valider_identite(intersection, rapport)
 
-        # Si l'intersection elle-même n'est pas une instance ou son type est invalide, on arrête
         if not isinstance(intersection, Intersection):
             if not _est_sequence_objets(branches):
                 rapport.ajouter_erreur(
@@ -239,14 +198,12 @@ class ValidateurIntersection:
                 )
             return rapport
 
-        # Étape 2 : Branches indépendantes et rattachement par intersection_tracking_id
         tracking_ids_branches_valides = self._valider_topologie(
             intersection_tracking_id_valide=intersection_tracking_id_valide,
             branches=branches,
             rapport=rapport,
         )
 
-        # Étape 3 : Voies indépendantes et rattachement par branche_tracking_id
         self._valider_voies(
             branches=branches,
             tracking_ids_branches_valides=tracking_ids_branches_valides,
@@ -261,10 +218,6 @@ class ValidateurIntersection:
         intersection: object,
         rapport: RapportValidationIntersection,
     ) -> UUID | None:
-        """
-        Étape 1 (Active) : vérifie l'existence, le type, le tracking_id (UUID),
-        l'identifiant technique `id` et le nom de l'intersection.
-        """
         rapport.enregistrer_etape("identite")
 
         if not isinstance(intersection, Intersection):
@@ -275,7 +228,6 @@ class ValidateurIntersection:
             )
             return None
 
-        # Validation de l'UUID de traçage (tracking_id)
         if not _est_uuid_valide(intersection.tracking_id):
             rapport.ajouter_erreur(
                 code="TRACKING_ID_INTERSECTION_INVALIDE",
@@ -286,7 +238,6 @@ class ValidateurIntersection:
         else:
             tracking_id_valide = intersection.tracking_id
 
-        # Validation de l'identifiant technique (id BDD)
         if not _est_id_technique_valide(intersection.id):
             rapport.ajouter_erreur(
                 code="ID_INTERSECTION_INVALIDE",
@@ -326,11 +277,6 @@ class ValidateurIntersection:
         branches: object,
         rapport: RapportValidationIntersection,
     ) -> set[UUID]:
-        """
-        Étape 2 (Active) : vérifie les branches indépendantes et leur rattachement explicite
-        par `intersection_tracking_id` (UUID).
-        Retourne l'ensemble des `tracking_id` (UUID) de branches entièrement valides.
-        """
         rapport.enregistrer_etape("topologie")
 
         if not _est_sequence_objets(branches):
@@ -380,10 +326,6 @@ class ValidateurIntersection:
         tracking_ids_dupliques: set[UUID],
         rapport: RapportValidationIntersection,
     ) -> tuple[bool, UUID | None]:
-        """
-        Vérifie le type, le tracking_id (UUID), l'id technique, le rattachement
-        intersection_tracking_id, le nom et l'angle d'une branche.
-        """
         prefixe_champ = f"branches[{index}]"
         if not isinstance(branche, Branche):
             rapport.ajouter_erreur(
@@ -395,7 +337,6 @@ class ValidateurIntersection:
 
         aucune_erreur = True
 
-        # Validation du tracking_id (UUID)
         if not _est_uuid_valide(branche.tracking_id):
             rapport.ajouter_erreur(
                 code="TRACKING_ID_BRANCHE_INVALIDE",
@@ -417,7 +358,6 @@ class ValidateurIntersection:
             tracking_ids_vus.add(branche.tracking_id)
             tid_b = branche.tracking_id
 
-        # Validation des identifiants techniques éventuels (id et intersection_id)
         if not _est_id_technique_valide(branche.id):
             rapport.ajouter_erreur(
                 code="ID_BRANCHE_INVALIDE",
@@ -434,7 +374,6 @@ class ValidateurIntersection:
             )
             aucune_erreur = False
 
-        # Vérification du rattachement explicite intersection_tracking_id (UUID)
         if (
             intersection_tracking_id_valide is None
             or not _est_uuid_valide(branche.intersection_tracking_id)
@@ -479,11 +418,6 @@ class ValidateurIntersection:
         voies: object,
         rapport: RapportValidationIntersection,
     ) -> None:
-        """
-        Étape 3 (Active) : vérifie les voies indépendantes, leur rattachement par branche_tracking_id (UUID)
-        à une branche valide, l'unicité globale de tracking_id (UUID),
-        et l'unicité de (branche_tracking_id, direction, position).
-        """
         rapport.enregistrer_etape("voies")
 
         compteur_voies_valides_par_branche: dict[UUID, int] = {
@@ -552,7 +486,6 @@ class ValidateurIntersection:
         compteur_voies_valides_par_branche: dict[UUID, int],
         rapport: RapportValidationIntersection,
     ) -> None:
-        """Signale toute branche valide qui ne possède aucune voie entièrement valide."""
         if not _est_sequence_objets(branches):
             return
 
@@ -587,10 +520,6 @@ class ValidateurIntersection:
         compteur_voies_valides_par_branche: dict[UUID, int],
         rapport: RapportValidationIntersection,
     ) -> None:
-        """
-        Vérifie les 7 conditions de validité d'une voie et n'incrémente le compteur de sa
-        branche que si la voie est intégralement valide.
-        """
         prefixe_champ_voie = f"voies[{index_voie}]"
         if not isinstance(voie, Voie):
             rapport.ajouter_erreur(
@@ -600,7 +529,6 @@ class ValidateurIntersection:
             )
             return
 
-        # 1 & 2. tracking_id valide (UUID) et globalement unique
         tracking_id_valide = _est_uuid_valide(voie.tracking_id)
         if not tracking_id_valide:
             rapport.ajouter_erreur(
@@ -611,10 +539,7 @@ class ValidateurIntersection:
         elif voie.tracking_id in tracking_ids_vus:
             rapport.ajouter_erreur(
                 code="TRACKING_ID_VOIE_DUPLIQUE",
-                message=(
-                    f"Le tracking_id '{voie.tracking_id}' est dupliqué "
-                    "au sein de l'intersection."
-                ),
+                message=f"Le tracking_id '{voie.tracking_id}' est dupliqué au sein de l'intersection.",
                 champ=f"{prefixe_champ_voie}.tracking_id",
             )
         else:
@@ -624,7 +549,6 @@ class ValidateurIntersection:
             tracking_id_valide and occurrences_tracking_ids[voie.tracking_id] == 1
         )
 
-        # Validation des identifiants techniques éventuels (id et branche_id)
         if not _est_id_technique_valide(voie.id):
             rapport.ajouter_erreur(
                 code="ID_VOIE_INVALIDE",
@@ -639,7 +563,6 @@ class ValidateurIntersection:
                 champ=f"{prefixe_champ_voie}.branche_id",
             )
 
-        # 3. Référence branche_tracking_id explicite (UUID) vers une branche valide
         branche_rattachee_valide = (
             _est_uuid_valide(voie.branche_tracking_id)
             and voie.branche_tracking_id in tracking_ids_branches_valides
@@ -654,7 +577,6 @@ class ValidateurIntersection:
                 champ=f"{prefixe_champ_voie}.branche_tracking_id",
             )
 
-        # 4. Nom non vide
         nom_voie = _normaliser_chaine(voie.nom)
         nom_valide = bool(nom_voie)
         if not nom_valide:
@@ -664,7 +586,6 @@ class ValidateurIntersection:
                 champ=f"{prefixe_champ_voie}.nom",
             )
 
-        # 5. Direction valide
         direction_valide = isinstance(voie.direction, DirectionVoie)
         if not direction_valide:
             rapport.ajouter_erreur(
@@ -676,7 +597,6 @@ class ValidateurIntersection:
                 champ=f"{prefixe_champ_voie}.direction",
             )
 
-        # 6. Position entière strictement positive (>= 1)
         position_valide = _est_position_voie_valide(voie.position)
         if not position_valide:
             rapport.ajouter_erreur(
@@ -688,7 +608,6 @@ class ValidateurIntersection:
                 champ=f"{prefixe_champ_voie}.position",
             )
 
-        # 7. Position non dupliquée pour le couple (branche_tracking_id, direction)
         position_unique = False
         if branche_rattachee_valide and direction_valide and position_valide:
             cle_position = (voie.branche_tracking_id, voie.direction, voie.position)
@@ -706,7 +625,6 @@ class ValidateurIntersection:
 
             position_unique = occurrences_positions[cle_position] == 1
 
-        # Comptabilisation stricte : la voie compte pour sa branche si tout est valide
         if (
             tracking_id_unique
             and branche_rattachee_valide
@@ -734,12 +652,6 @@ def _filtrer_voies_par_branche_et_direction(
     voies: Sequence[Voie],
     direction: DirectionVoie,
 ) -> tuple[Voie, ...]:
-    """
-    Contrat déterministe de filtrage des voies par branche et direction :
-    - `branche_ou_tracking_id` doit être une instance de Branche ou un UUID valide.
-    - Ignore toute voie non valide ou qui ne correspond pas au tracking_id/direction.
-    - Retourne les voies triées par position croissante puis par tracking_id.
-    """
     tracking_id_branche = _extraire_tracking_id_branche(branche_ou_tracking_id)
 
     if not _est_sequence_objets(voies):
@@ -768,10 +680,6 @@ def obtenir_voies_entrantes(
     branche_ou_tracking_id: Branche | UUID,
     voies: Sequence[Voie],
 ) -> tuple[Voie, ...]:
-    """
-    Retourne les voies entrantes (`DirectionVoie.ENTRANTE`) valides rattachées à la branche,
-    triées par `position` croissante.
-    """
     return _filtrer_voies_par_branche_et_direction(
         branche_ou_tracking_id=branche_ou_tracking_id,
         voies=voies,
@@ -783,10 +691,6 @@ def obtenir_voies_sortantes(
     branche_ou_tracking_id: Branche | UUID,
     voies: Sequence[Voie],
 ) -> tuple[Voie, ...]:
-    """
-    Retourne les voies sortantes (`DirectionVoie.SORTANTE`) valides rattachées à la branche,
-    triées par `position` croissante.
-    """
     return _filtrer_voies_par_branche_et_direction(
         branche_ou_tracking_id=branche_ou_tracking_id,
         voies=voies,
@@ -801,7 +705,6 @@ def valider_intersection(
     *,
     lever_exception: bool = False,
 ) -> RapportValidationIntersection:
-    """Fonction utilitaire validant une intersection et ses entités associées."""
     rapport = ValidateurIntersection().valider(
         intersection=intersection,
         branches=branches,

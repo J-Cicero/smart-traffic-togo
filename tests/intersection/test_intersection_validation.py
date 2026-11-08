@@ -9,13 +9,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.intersection.exceptions import ErreurValidationIntersection
-from app.intersection.models.topology import (
+from app.intersection.entities import (
     Branche,
     DirectionVoie,
     Intersection,
     Voie,
 )
-from app.intersection.services.intersection_validator import (
+from app.intersection.validator import (
     AnomalieValidationIntersection,
     GraviteValidation,
     RapportValidationIntersection,

@@ -1,14 +1,13 @@
 """
-Modèles métier de la structure topologique d'un carrefour.
+Entités métier pures du domaine Intersection.
 
-Architecture à entités indépendantes avec double identification :
-- `id`: identifiant technique (clé primaire de persistance BDD, typiquement int | None = None)
-- `tracking_id`: identifiant fonctionnel UUID (génération automatique uuid4)
-- Les associations métier entre entités sont représentées par des identifiants explicites :
-  * Branche possède `intersection_tracking_id: UUID` (et `intersection_id: int | None = None`)
-  * Voie possède `branche_tracking_id: UUID` (et `branche_id: int | None = None`)
-- Aucune entité ne contient de collection d'autres entités (pas de @OneToMany, pas de @ManyToMany).
-- Aucune entité n'embarque une référence d'objet directe vers une autre entité.
+Règles architecturales strictes :
+- Double identification : `id` (technique interne) et `tracking_id` (fonctionnel UUID).
+- Entités indépendantes sans aucune dépendance ORM ou SQLAlchemy.
+- Aucune relation OneToMany ou ManyToMany, aucune collection d'entités imbriquées.
+- Associations réalisées exclusivement par identifiants explicites :
+  * `branche.intersection_tracking_id` -> `intersection.tracking_id`
+  * `voie.branche_tracking_id` -> `branche.tracking_id`
 """
 
 from __future__ import annotations
