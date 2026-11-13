@@ -1,87 +1,18 @@
-# TRAFFIC TOGO — CONTEXTE ET DIRECTIVES DU PROJET
-
-> **Document de référence permanent.** Ce fichier doit être lu avant toute intervention importante et maintenu à jour uniquement lorsque des décisions structurantes sont explicitement validées.
-
----
-
-## 1. Vision Globale de Traffic Togo
-
-**Traffic Togo** est un système intelligent de surveillance, d'analyse et de régulation du trafic routier au Togo.
-
-Son objectif global à moyen et long terme est de permettre une gestion coordonnée et sécurisée de la circulation à travers de multiples intersections de géométries variées (3, 4, 5 branches ou davantage), en s'appuyant sur :
-1. **Modélisation métier complète et configurable des intersections** (branches, voies d'entrée/sortie, mouvements directionnels, incompatibilités entre mouvements, groupes de feux et phases de circulation).
-2. **Moteur déterministe de gestion des phases et de régulation sécurisée** (filtrage de sécurité indépendant des agents IA).
-3. **Observation du trafic** et traitement des données issues des caméras et de la vision par ordinateur.
-4. **Agent intelligent local** pour chaque intersection (analyse locale et propositions de régulation).
-5. **Agent central de coordination** à l'échelle du réseau (supervision des agents locaux et cohérence inter-carrefours).
-6. **Modes de fonctionnement multiples** :
-   - Régulation intelligente automatique.
-   - Fonctionnement classique préconfiguré.
-   - Modes de secours, de défaillance et de maintenance.
-7. **Supervision humaine** permettant aux opérateurs de consulter, valider ou corriger les décisions dans le cadre de leurs habilitations.
-8. **Organisation territoriale** rattachant les intersections aux régions et aux services techniques responsables.
-
----
-
-## 2. État Actuel et Périmètre de Développement Actif
-
-**Périmètre actif : BACKEND UNIQUEMENT — Socle Architectural & Domaine Métier `intersection` (Étape 1 : Topologie à entités indépendantes).**
-
-### Ce qui est implémenté et opérationnel à ce stade :
-- **Socle technique (`app/core/`)** : configuration technique globale de l'application (`ConfigurationApplication`, `Environnement`, `ErreurConfiguration`) et point d'entrée simple (`main.py` avec `charger_configuration`).
-- **Topologie du domaine `app/intersection/` (Entités indépendantes)** :
-  - Modèles métier purs et autonomes dans `app/intersection/models/topology.py` :
-    - `Intersection` (`id_intersection`, `nom`, `description`)
-    - `Branche` (`id_branche`, `id_intersection`, `nom`, `angle_degres`)
-    - `Voie` (`id_voie`, `id_branche`, `nom`, `direction`, `position`)
-    - `DirectionVoie` (`ENTRANTE`, `SORTANTE`)
-  - Service de validation évolutive dans `app/intersection/services/intersection_validator.py` (`ValidateurIntersection`, `RapportValidationIntersection`, `AnomalieValidationIntersection`, `GraviteValidation`, `valider_intersection`, `obtenir_voies_entrantes`, `obtenir_voies_sortantes`) et exception métier `ErreurValidationIntersection`.
-  - Trois étapes de validation sont actives :
-    1. `"identite"` : identifiant, nom et description de l'intersection.
-    2. `"topologie"` : cohérence du rattachement `Branche.id_intersection`, au moins 3 branches rattachées, unicité des `id_branche`, validité des angles.
-    3. `"voies"` : cohérence du rattachement `Voie.id_branche`, au moins 1 voie par branche, unicité globale des `id_voie`, unicité des positions par `(id_branche, direction)`, validité de la direction et de la position.
-
-### Prochaine sous-étape à concevoir/implémenter dans `app/intersection/` :
-- Modélisation sous forme d'entités indépendantes des mouvements, des incompatibilités, des groupes de feux et des phases, ainsi que l'activation des étapes correspondantes dans `intersection_validator.py`.
-
----
-
-## 3. Fonctionnalités Hors Périmètre Actuel (Phases Ultérieures)
-
-Ne **pas** créer ni anticiper tant que l'étape correspondante n'est pas engagée :
-- Les futurs domaines métier : `regulation` (dont $T_{min}$, $T_{max}$, durées de transition, calcul PCU), `vision` (caméras, OpenCV, YOLO), `agents` (locaux et central), `supervision` (opérateurs, régions).
-- Les couches techniques non encore requises dans `intersection` : `repositories/`, `schemas/`, `routers/`.
-- Un dossier `app/shared/` tant qu'aucun composant n'est réellement partagé entre plusieurs domaines actifs.
-- Une base de données ou un ORM.
-- Toute interface frontend, dashboard ou pilotage matériel de feux physiques.
-
----
-
-## 4. Décisions Architecturales et Techniques Validées
-
-1. **Architecture Modulithique structurée par Domaine Métier :**
-   - Chaque domaine métier possède son propre périmètre (`app/intersection/` actuellement).
-   - Séparation interne par couches : `models/` (modèles métier purs) et `services/` (règles et validations métier du domaine).
-2. **Indépendance stricte des entités métier (Absence de relations One-to-Many / Many-to-Many imbriquées) :**
-   - Chaque entité métier est autonome et possède son propre identifiant.
-   - Aucune entité ne contient directement d'instances ou de collections d'autres entités.
-   - Les associations entre entités sont représentées exclusivement par des identifiants explicites (`id_intersection`, `id_branche`, etc.).
-   - La cohérence des associations est garantie par des services métier dédiés.
-   - Dans la future couche de persistance, nous n'utiliserons pas de relations ORM (`OneToMany` / `ManyToMany` / `relationship()`).
-3. **Convention de nommage Francophone (DDD en français) :**
-   - Les noms des classes métier, de leurs attributs, méthodes et codes d'anomalies sont rédigés en français (`Intersection`, `Branche`, `Voie`, `DirectionVoie`, `ValidateurIntersection`, `valider_intersection`, etc.).
-4. **Périmètre strict de `app/core/` :**
-   - Réservé exclusivement à la configuration technique globale de l'application (`nom_application`, `environnement`, `mode_debug`).
-5. **Indépendance absolue des modèles métier :**
-   - Écrits en Python 3.10+ natif typé (`dataclasses(frozen=True, slots=True)`), sans dépendance envers un framework web ou un SGBD.
-6. **Principe de sécurité routière (Safety First) :**
-   - Les agents IA futurs ne commanderont jamais directement les feux ; toute décision passera par une validation déterministe.
-
----
-
-## 5. Règles de Travail Obligatoires
-
-1. Lire ce fichier avant toute intervention importante.
-2. Respecter strictement le périmètre de l'étape active (aucun dossier vide, aucun domaine futur anticipé).
-3. Appliquer systématiquement la **règle de contradiction constructive** : signaler toute proposition qui contredit une décision validée, mélange les responsabilités ou introduit une complexité prématurée.
-4. Suivre le cycle progressif : Comprendre → Examiner → Proposer la conception → Attendre la validation → Implémenter le périmètre validé → Tester → Présenter les résultats.
+# PROJECT_CONTEXT  Traffic Togo
+## But
+Système de régulation adaptative des feux de circulation pour Lomé (Togo). Des caméras observent chaque approche d'un carrefour. Un Raspberry Pi local compte les véhicules par classe. Un calcul propose les durées de vert. Un mécanisme de sécurité déterministe vérifie et applique. Si l'IA, les caméras ou le réseau échouent, le carrefour passe seul en mode classique (temps fixes). Des opérateurs humains supervisent.
+État actuel : prototype logiciel V0, sans matériel ni vision. Tout est testé avec un simulateur de trafic.
+Environnement : Windows, PowerShell, Python 3.12, .venv à la racine. Dépôt GitHub J-Cicero/smart-traffic-togo, branche restart.
+## Règles de sécurité (non négociables)
+- Jamais deux mouvements en conflit au vert en même temps.
+- L' Cycle d'une phase : VERT  JAUNE  TOUT_ROUGE  ROUGE. Jamais de passage direct du vert au rouge.
+- Bascule automatique et locale vers le mode classique si les mesures manquent ou sont invalides. Retour à l'adaptatif seulement après plusieurs cycles de mesures valides, à un moment sûr.
+- Les paramètres de sécurité sont dans une configuration, jamais en dur. Valeurs provisoires : vert min 10 s, vert max 60 s, jaune 3 s, tout-rouge entre 0 et 2 s (0 = passage direct d'un groupe au rouge et de l'autre au vert ; valeur à décider). À confirmer avec les autorités.
+## Modèle métier
+- Intersection  Branches (directions d'accès, azimut horaire : 0° Nord, 90° Est, 180° Sud, 270° Ouest)  Voies (ENTRANTE ou SORTANTE, avec une position).
+- Décision du porteur du projet : angle_degres est obligatoire (nombre fini entre 0 et 360). Ce n'est pas hérité de l'ancien code.
+- Phase = ensemble de branches servies ensemble, avec un ordre. Un carrefour peut avoir 2 phases (Nord-Sud / Est-Ouest) ou 4 phases (une par branche). Le code ne doit jamais supposer 2 phases.
+- Conflit = deux branches qui ne doivent jamais être au vert ensemble. Les conflits sont déclarés dans la configuration. Une phase est invalide si elle contient deux branches en conflit.
+- Premier périmètre : carrefours à 4 branches. Carrefours en T, à 6 ou 8 branches plus tard.
+- Classes de véhicules : MOTO, TRICYCLE, VOITURE, MINIBUS, BUS, CAMION. Le poids n'est pas mesuré : la classe visuelle sert d'indicateur. Chaque classe a un temps de passage (intervalle entre deux véhicules) en dixièmes de seconde, entier naturel. Valeurs provisoires à calibrer sur le terrain.
+- Mesure = comptes par classe et par voie sur une période, avec horodatage, durée, confiance et version du modèle. C'est l'entrée du calcul de durée. La vision la produira plus tard.
