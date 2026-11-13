@@ -1,48 +1,29 @@
-"""Configuration technique globale de l'application backend."""
-
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
-import os
+from typing import Literal
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class ErreurConfiguration(Exception):
-    """Levée lorsque la configuration technique de l'application est invalide."""
+class Settings(BaseSettings):
+    """Configuration globale de l'application."""
 
-
-class Environnement(str, Enum):
-    """Environnements techniques d'exécution."""
-
-    DEVELOPPEMENT = "developpement"
-    TEST = "test"
-    PRODUCTION = "production"
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigurationApplication:
-    """
-    Paramètres techniques globaux de l'application.
-    Ne contient aucun paramètre métier de régulation.
-    """
-
-    nom_application: str = "Traffic Togo Backend"
-    environnement: Environnement = Environnement.DEVELOPPEMENT
-    mode_debug: bool = False
-    database_url: str = field(
-        default_factory=lambda: os.getenv(
-            "DATABASE_URL",
-            "postgresql+psycopg2://postgres:postgres@localhost:5432/traffic_togo",
-        )
+    model_config = SettingsConfigDict(
+        env_prefix="TRAFFIC_",
+        case_sensitive=False,
     )
 
-    def valider(self) -> None:
-        """Vérifie la validité des paramètres techniques globaux."""
-        if not self.nom_application.strip():
-            raise ErreurConfiguration(
-                "Le paramètre technique 'nom_application' ne peut pas être vide."
-            )
-        if not self.database_url.strip():
-            raise ErreurConfiguration(
-                "Le paramètre technique 'database_url' ne peut pas être vide."
-            )
+    nom_application: str = "Traffic Togo"
+    environnement: Literal["dev", "test", "prod"] = "dev"
+
+    @field_validator("nom_application")
+    @classmethod
+    def valider_nom_application(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Le nom de l'application ne peut pas être vide.")
+        return v.strip()
+
+
+def charger_configuration() -> Settings:
+    """Charge et retourne la configuration validée."""
+    return Settings()
