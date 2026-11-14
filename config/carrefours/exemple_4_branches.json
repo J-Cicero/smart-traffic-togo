@@ -1,0 +1,91 @@
+{
+  "intersection": {
+    "id_intersection": "int_dekon",
+    "nom": "Carrefour Dékon",
+    "description": "Intersection principale du boulevard circulaire à Lomé"
+  },
+  "branches": [
+    {
+      "id_branche": "b_nord",
+      "id_intersection": "int_dekon",
+      "nom": "Avenue de la Libération (Nord)",
+      "angle_degres": 0.0
+    },
+    {
+      "id_branche": "b_est",
+      "id_intersection": "int_dekon",
+      "nom": "Boulevard Circulaire Est",
+      "angle_degres": 90.0
+    },
+    {
+      "id_branche": "b_sud",
+      "id_intersection": "int_dekon",
+      "nom": "Avenue de la Libération (Sud)",
+      "angle_degres": 180.0
+    },
+    {
+      "id_branche": "b_ouest",
+      "id_intersection": "int_dekon",
+      "nom": "Boulevard Circulaire Ouest",
+      "angle_degres": 270.0
+    }
+  ],
+  "voies": [
+    {
+      "id_voie": "v_nord_in",
+      "id_branche": "b_nord",
+      "nom": "Voie Entrante Nord",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_nord_out",
+      "id_branche": "b_nord",
+      "nom": "Voie Sortante Nord",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_est_in",
+      "id_branche": "b_est",
+      "nom": "Voie Entrante Est",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_est_out",
+      "id_branche": "b_est",
+      "nom": "Voie Sortante Est",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_sud_in",
+      "id_branche": "b_sud",
+      "nom": "Voie Entrante Sud",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_sud_out",
+      "id_branche": "b_sud",
+      "nom": "Voie Sortante Sud",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_ouest_in",
+      "id_branche": "b_ouest",
+      "nom": "Voie Entrante Ouest",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "v_ouest_out",
+      "id_branche": "b_ouest",
+      "nom": "Voie Sortante Ouest",
+      "direction": "SORTANTE",
+      "position": 1
+    }
+  ]
+}

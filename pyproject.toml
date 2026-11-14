@@ -32,9 +32,25 @@ norecursedirs = ["_legacy", ".venv", ".git"]
 
 [tool.importlinter]
 root_package = "app"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Isolation de app.core"
 type = "forbidden"
 source_modules = ["app.core"]
 forbidden_modules = ["app.main"]
+
+[[tool.importlinter.contracts]]
+name = "Isolation de app.intersection.entities et validator"
+type = "forbidden"
+source_modules = [
+    "app.intersection.entities",
+    "app.intersection.validator",
+]
+forbidden_modules = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+]
+
+
