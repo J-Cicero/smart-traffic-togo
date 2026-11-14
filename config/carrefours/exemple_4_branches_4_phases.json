@@ -1,0 +1,147 @@
+{
+  "intersection": {
+    "id_intersection": "int_exemple",
+    "nom": "Carrefour exemple",
+    "description": "Exemple synthétique d'un carrefour à 4 branches et 4 phases"
+  },
+  "branches": [
+    {
+      "id_branche": "br_nord",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Nord",
+      "angle_degres": 0.0
+    },
+    {
+      "id_branche": "br_est",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Est",
+      "angle_degres": 90.0
+    },
+    {
+      "id_branche": "br_sud",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Sud",
+      "angle_degres": 180.0
+    },
+    {
+      "id_branche": "br_ouest",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Ouest",
+      "angle_degres": 270.0
+    }
+  ],
+  "voies": [
+    {
+      "id_voie": "voie_nord_entrante",
+      "id_branche": "br_nord",
+      "nom": "Voie Nord Entrante",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_nord_sortante",
+      "id_branche": "br_nord",
+      "nom": "Voie Nord Sortante",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_est_entrante",
+      "id_branche": "br_est",
+      "nom": "Voie Est Entrante",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_est_sortante",
+      "id_branche": "br_est",
+      "nom": "Voie Est Sortante",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_sud_entrante",
+      "id_branche": "br_sud",
+      "nom": "Voie Sud Entrante",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_sud_sortante",
+      "id_branche": "br_sud",
+      "nom": "Voie Sud Sortante",
+      "direction": "SORTANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_ouest_entrante",
+      "id_branche": "br_ouest",
+      "nom": "Voie Ouest Entrante",
+      "direction": "ENTRANTE",
+      "position": 1
+    },
+    {
+      "id_voie": "voie_ouest_sortante",
+      "id_branche": "br_ouest",
+      "nom": "Voie Ouest Sortante",
+      "direction": "SORTANTE",
+      "position": 1
+    }
+  ],
+  "phases": [
+    {
+      "id_phase": "ph_nord",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Nord",
+      "ordre": 1,
+      "ids_branches": [
+        "br_nord"
+      ]
+    },
+    {
+      "id_phase": "ph_est",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Est",
+      "ordre": 2,
+      "ids_branches": [
+        "br_est"
+      ]
+    },
+    {
+      "id_phase": "ph_sud",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Sud",
+      "ordre": 3,
+      "ids_branches": [
+        "br_sud"
+      ]
+    },
+    {
+      "id_phase": "ph_ouest",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Ouest",
+      "ordre": 4,
+      "ids_branches": [
+        "br_ouest"
+      ]
+    }
+  ],
+  "conflits": [
+    {
+      "id_branche_a": "br_nord",
+      "id_branche_b": "br_est"
+    },
+    {
+      "id_branche_a": "br_nord",
+      "id_branche_b": "br_ouest"
+    },
+    {
+      "id_branche_a": "br_sud",
+      "id_branche_b": "br_est"
+    },
+    {
+      "id_branche_a": "br_sud",
+      "id_branche_b": "br_ouest"
+    }
+  ]
+}

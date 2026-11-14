@@ -1,91 +1,131 @@
 {
   "intersection": {
-    "id_intersection": "int_dekon",
-    "nom": "Carrefour Dékon",
-    "description": "Intersection principale du boulevard circulaire à Lomé"
+    "id_intersection": "int_exemple",
+    "nom": "Carrefour exemple",
+    "description": "Exemple synthétique d'un carrefour à 4 branches et 2 phases"
   },
   "branches": [
     {
-      "id_branche": "b_nord",
-      "id_intersection": "int_dekon",
-      "nom": "Avenue de la Libération (Nord)",
+      "id_branche": "br_nord",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Nord",
       "angle_degres": 0.0
     },
     {
-      "id_branche": "b_est",
-      "id_intersection": "int_dekon",
-      "nom": "Boulevard Circulaire Est",
+      "id_branche": "br_est",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Est",
       "angle_degres": 90.0
     },
     {
-      "id_branche": "b_sud",
-      "id_intersection": "int_dekon",
-      "nom": "Avenue de la Libération (Sud)",
+      "id_branche": "br_sud",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Sud",
       "angle_degres": 180.0
     },
     {
-      "id_branche": "b_ouest",
-      "id_intersection": "int_dekon",
-      "nom": "Boulevard Circulaire Ouest",
+      "id_branche": "br_ouest",
+      "id_intersection": "int_exemple",
+      "nom": "Branche Ouest",
       "angle_degres": 270.0
     }
   ],
   "voies": [
     {
-      "id_voie": "v_nord_in",
-      "id_branche": "b_nord",
-      "nom": "Voie Entrante Nord",
+      "id_voie": "voie_nord_entrante",
+      "id_branche": "br_nord",
+      "nom": "Voie Nord Entrante",
       "direction": "ENTRANTE",
       "position": 1
     },
     {
-      "id_voie": "v_nord_out",
-      "id_branche": "b_nord",
-      "nom": "Voie Sortante Nord",
+      "id_voie": "voie_nord_sortante",
+      "id_branche": "br_nord",
+      "nom": "Voie Nord Sortante",
       "direction": "SORTANTE",
       "position": 1
     },
     {
-      "id_voie": "v_est_in",
-      "id_branche": "b_est",
-      "nom": "Voie Entrante Est",
+      "id_voie": "voie_est_entrante",
+      "id_branche": "br_est",
+      "nom": "Voie Est Entrante",
       "direction": "ENTRANTE",
       "position": 1
     },
     {
-      "id_voie": "v_est_out",
-      "id_branche": "b_est",
-      "nom": "Voie Sortante Est",
+      "id_voie": "voie_est_sortante",
+      "id_branche": "br_est",
+      "nom": "Voie Est Sortante",
       "direction": "SORTANTE",
       "position": 1
     },
     {
-      "id_voie": "v_sud_in",
-      "id_branche": "b_sud",
-      "nom": "Voie Entrante Sud",
+      "id_voie": "voie_sud_entrante",
+      "id_branche": "br_sud",
+      "nom": "Voie Sud Entrante",
       "direction": "ENTRANTE",
       "position": 1
     },
     {
-      "id_voie": "v_sud_out",
-      "id_branche": "b_sud",
-      "nom": "Voie Sortante Sud",
+      "id_voie": "voie_sud_sortante",
+      "id_branche": "br_sud",
+      "nom": "Voie Sud Sortante",
       "direction": "SORTANTE",
       "position": 1
     },
     {
-      "id_voie": "v_ouest_in",
-      "id_branche": "b_ouest",
-      "nom": "Voie Entrante Ouest",
+      "id_voie": "voie_ouest_entrante",
+      "id_branche": "br_ouest",
+      "nom": "Voie Ouest Entrante",
       "direction": "ENTRANTE",
       "position": 1
     },
     {
-      "id_voie": "v_ouest_out",
-      "id_branche": "b_ouest",
-      "nom": "Voie Sortante Ouest",
+      "id_voie": "voie_ouest_sortante",
+      "id_branche": "br_ouest",
+      "nom": "Voie Ouest Sortante",
       "direction": "SORTANTE",
       "position": 1
+    }
+  ],
+  "phases": [
+    {
+      "id_phase": "ph_nord_sud",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Nord-Sud",
+      "ordre": 1,
+      "ids_branches": [
+        "br_nord",
+        "br_sud"
+      ]
+    },
+    {
+      "id_phase": "ph_est_ouest",
+      "id_intersection": "int_exemple",
+      "nom": "Phase Est-Ouest",
+      "ordre": 2,
+      "ids_branches": [
+        "br_est",
+        "br_ouest"
+      ]
+    }
+  ],
+  "conflits": [
+    {
+      "id_branche_a": "br_nord",
+      "id_branche_b": "br_est"
+    },
+    {
+      "id_branche_a": "br_nord",
+      "id_branche_b": "br_ouest"
+    },
+    {
+      "id_branche_a": "br_sud",
+      "id_branche_b": "br_est"
+    },
+    {
+      "id_branche_a": "br_sud",
+      "id_branche_b": "br_ouest"
     }
   ]
 }

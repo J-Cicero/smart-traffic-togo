@@ -3,7 +3,8 @@ Entités métier du domaine Intersection.
 
 Règles de conception :
 - Dataclasses figées (frozen=True, slots=True).
-- Identifiants exclusivement sous forme de chaînes de caractères (id_intersection, id_branche, id_voie).
+- Identifiants exclusivement sous forme de chaînes de caractères (id_intersection, id_branche, id_voie, id_phase).
+- Aucune valeur par défaut silencieuse sur des données de sécurité (direction, position).
 - Aucune dépendance externe (ni FastAPI, ni SQLAlchemy, ni Pydantic).
 - Aucune collection d'entités imbriquée : relations établies par identifiants explicites.
 """
@@ -53,11 +54,36 @@ class Voie:
     """
     Représente une voie physique de circulation.
     Identifiant fonctionnel str, reliée à sa branche par id_branche.
-    Ne contient aucune référence directe à l'objet Branche.
+    Direction et position obligatoires sans valeur par défaut.
     """
 
     id_voie: str
     id_branche: str
     nom: str
-    direction: DirectionVoie = DirectionVoie.ENTRANTE
-    position: int = 1
+    direction: DirectionVoie
+    position: int
+
+
+@dataclass(frozen=True, slots=True)
+class Phase:
+    """
+    Phase de feux autorisant le mouvement simultané d'un groupe de branches.
+    ids_branches est un tuple d'identifiants de branches actives pendant cette phase.
+    """
+
+    id_phase: str
+    id_intersection: str
+    nom: str
+    ordre: int
+    ids_branches: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ConflitBranches:
+    """
+    Déclaration d'un conflit binaire entre deux branches qui ne doivent
+    jamais être au vert en même temps.
+    """
+
+    id_branche_a: str
+    id_branche_b: str

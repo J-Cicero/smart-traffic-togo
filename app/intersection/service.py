@@ -6,7 +6,14 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from app.intersection.entities import Branche, DirectionVoie, Intersection, Voie
+from app.intersection.entities import (
+    Branche,
+    ConflitBranches,
+    DirectionVoie,
+    Intersection,
+    Phase,
+    Voie,
+)
 from app.intersection.exceptions import (
     ErreurChargementCarrefour,
     ErreurValidationIntersection,
@@ -21,6 +28,8 @@ class CarrefourCharge:
     intersection: Intersection
     branches: tuple[Branche, ...]
     voies: tuple[Voie, ...]
+    phases: tuple[Phase, ...]
+    conflits: tuple[ConflitBranches, ...]
 
 
 def charger_carrefour(chemin: Path) -> CarrefourCharge:
@@ -50,7 +59,7 @@ def charger_carrefour(chemin: Path) -> CarrefourCharge:
     if not isinstance(donnees, dict):
         raise ErreurChargementCarrefour("Le contenu JSON racine doit être un objet/dictionnaire.")
 
-    for cle_racine in ("intersection", "branches", "voies"):
+    for cle_racine in ("intersection", "branches", "voies", "phases", "conflits"):
         if cle_racine not in donnees:
             raise ErreurChargementCarrefour(f"Clé manquante à la racine du JSON: '{cle_racine}'.")
 
@@ -156,13 +165,85 @@ def charger_carrefour(chemin: Path) -> CarrefourCharge:
             )
         )
 
+    donnees_phases = donnees["phases"]
+    if not isinstance(donnees_phases, list):
+        raise ErreurChargementCarrefour("La section 'phases' doit être une liste.")
+
+    phases_list: list[Phase] = []
+    for idx_p, p_item in enumerate(donnees_phases):
+        if not isinstance(p_item, dict):
+            raise ErreurChargementCarrefour(f"phases[{idx_p}] doit être un dictionnaire.")
+        for cle_p in ("id_phase", "id_intersection", "nom", "ordre", "ids_branches"):
+            if cle_p not in p_item:
+                raise ErreurChargementCarrefour(f"Clé manquante dans phases[{idx_p}]: '{cle_p}'.")
+
+        id_p = p_item["id_phase"]
+        id_inter_p = p_item["id_intersection"]
+        nom_p = p_item["nom"]
+        ordre_p = p_item["ordre"]
+        ids_branches_p = p_item["ids_branches"]
+
+        if not isinstance(id_p, str) or not isinstance(id_inter_p, str) or not isinstance(nom_p, str):
+            raise ErreurChargementCarrefour(f"Identifiants et nom dans phases[{idx_p}] doivent être des chaînes.")
+
+        if isinstance(ordre_p, bool) or not isinstance(ordre_p, int):
+            raise ErreurChargementCarrefour(f"'ordre' dans phases[{idx_p}] doit être un entier.")
+
+        if not isinstance(ids_branches_p, list):
+            raise ErreurChargementCarrefour(f"'ids_branches' dans phases[{idx_p}] doit être une liste.")
+
+        for idx_bp, b_id in enumerate(ids_branches_p):
+            if not isinstance(b_id, str):
+                raise ErreurChargementCarrefour(
+                    f"Élément ids_branches[{idx_bp}] dans phases[{idx_p}] doit être une chaîne."
+                )
+
+        phases_list.append(
+            Phase(
+                id_phase=id_p,
+                id_intersection=id_inter_p,
+                nom=nom_p,
+                ordre=ordre_p,
+                ids_branches=tuple(ids_branches_p),
+            )
+        )
+
+    donnees_conflits = donnees["conflits"]
+    if not isinstance(donnees_conflits, list):
+        raise ErreurChargementCarrefour("La section 'conflits' doit être une liste.")
+
+    conflits_list: list[ConflitBranches] = []
+    for idx_c, c_item in enumerate(donnees_conflits):
+        if not isinstance(c_item, dict):
+            raise ErreurChargementCarrefour(f"conflits[{idx_c}] doit être un dictionnaire.")
+        for cle_c in ("id_branche_a", "id_branche_b"):
+            if cle_c not in c_item:
+                raise ErreurChargementCarrefour(f"Clé manquante dans conflits[{idx_c}]: '{cle_c}'.")
+
+        id_ba = c_item["id_branche_a"]
+        id_bb = c_item["id_branche_b"]
+
+        if not isinstance(id_ba, str) or not isinstance(id_bb, str):
+            raise ErreurChargementCarrefour(f"Identifiants dans conflits[{idx_c}] doivent être des chaînes.")
+
+        conflits_list.append(
+            ConflitBranches(
+                id_branche_a=id_ba,
+                id_branche_b=id_bb,
+            )
+        )
+
     branches_tuple = tuple(branches_list)
     voies_tuple = tuple(voies_list)
+    phases_tuple = tuple(phases_list)
+    conflits_tuple = tuple(conflits_list)
 
     rapport = valider_intersection(
         intersection=intersection,
         branches=branches_tuple,
         voies=voies_tuple,
+        phases=phases_tuple,
+        conflits=conflits_tuple,
     )
     rapport.lever_si_invalide()
 
@@ -170,4 +251,6 @@ def charger_carrefour(chemin: Path) -> CarrefourCharge:
         intersection=intersection,
         branches=branches_tuple,
         voies=voies_tuple,
+        phases=phases_tuple,
+        conflits=conflits_tuple,
     )

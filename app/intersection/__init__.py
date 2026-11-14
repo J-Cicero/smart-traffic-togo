@@ -2,8 +2,10 @@
 
 from app.intersection.entities import (
     Branche,
+    ConflitBranches,
     DirectionVoie,
     Intersection,
+    Phase,
     Voie,
 )
 from app.intersection.exceptions import (
@@ -29,12 +31,14 @@ __all__ = [
     "AnomalieValidationIntersection",
     "Branche",
     "CarrefourCharge",
+    "ConflitBranches",
     "DirectionVoie",
     "ErreurChargementCarrefour",
     "ErreurIntersectionBase",
     "ErreurValidationIntersection",
     "GraviteValidation",
     "Intersection",
+    "Phase",
     "RapportValidationIntersection",
     "ValidateurIntersection",
     "Voie",

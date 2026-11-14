@@ -7,8 +7,10 @@ import pytest
 
 from app.intersection.entities import (
     Branche,
+    ConflitBranches,
     DirectionVoie,
     Intersection,
+    Phase,
     Voie,
 )
 from app.intersection.exceptions import ErreurValidationIntersection
@@ -63,6 +65,21 @@ def _creer_topologie_base(
         )
 
     return inter, branches, voies
+
+
+def _creer_phases_et_conflits_valides(
+    id_inter: str = "int_1",
+) -> tuple[tuple[Phase, ...], tuple[ConflitBranches, ...]]:
+    """Construit des phases et conflits cohérents pour un carrefour à 3 branches (b_1, b_2, b_3)."""
+    phases = (
+        Phase(id_phase="p1", id_intersection=id_inter, nom="Phase 1", ordre=1, ids_branches=("b_1", "b_2")),
+        Phase(id_phase="p2", id_intersection=id_inter, nom="Phase 2", ordre=2, ids_branches=("b_3",)),
+    )
+    conflits = (
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_3"),
+        ConflitBranches(id_branche_a="b_2", id_branche_b="b_3"),
+    )
+    return phases, conflits
 
 
 # ---------------------------------------------------------------------------
@@ -426,3 +443,286 @@ def test_lever_si_invalide_leve_erreur_validation_intersection() -> None:
 
     assert "Validation de l'intersection échouée" in str(exc_info.value)
     assert len(exc_info.value.anomalies) > 0
+
+
+# ---------------------------------------------------------------------------
+# T3 : Conflits (Règle D.1)
+# ---------------------------------------------------------------------------
+
+
+def test_conflit_reference_deux_branches_valides_differentes() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    phases, _ = _creer_phases_et_conflits_valides()
+
+    # Auto-référence (A == B)
+    c_auto = ConflitBranches(id_branche_a="b_1", id_branche_b="b_1")
+    rapport_auto = valider_intersection(inter, branches, voies, phases=phases, conflits=(c_auto,))
+    assert rapport_auto.est_valide is False
+    codes_auto = {e.code for e in rapport_auto.erreurs}
+    assert "CONFLIT_BRANCHE_AUTO_REFERENCE" in codes_auto
+
+    # Branche inconnue
+    c_inconnu = ConflitBranches(id_branche_a="b_1", id_branche_b="b_inconnue")
+    rapport_inconnu = valider_intersection(inter, branches, voies, phases=phases, conflits=(c_inconnu,))
+    assert rapport_inconnu.est_valide is False
+    codes_inconnu = {e.code for e in rapport_inconnu.erreurs}
+    assert "CONFLIT_BRANCHE_INCONNUE" in codes_inconnu
+
+
+def test_conflit_doublon_meme_inverse_est_rejete() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    phases, conflits_valides = _creer_phases_et_conflits_valides()
+
+    # Ajout du conflit inverse ("b_3", "b_1") alors que ("b_1", "b_3") existe déjà
+    c_inverse = ConflitBranches(id_branche_a="b_3", id_branche_b="b_1")
+    conflits_avec_doublon = (*conflits_valides, c_inverse)
+
+    rapport = valider_intersection(inter, branches, voies, phases=phases, conflits=conflits_avec_doublon)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "CONFLIT_DUPLIQUE" in codes
+
+
+def test_conflit_mauvais_types_produit_anomalie_sans_exception() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    phases, _ = _creer_phases_et_conflits_valides()
+
+    c_mauvais_type = ConflitBranches(id_branche_a=123, id_branche_b=None)  # type: ignore[arg-type]
+    conflits_avec_intrus = (c_mauvais_type, "pas_un_conflit")
+
+    validateur = ValidateurIntersection()
+    rapport = validateur.valider(
+        inter,
+        branches,
+        voies,
+        phases=phases,
+        conflits=conflits_avec_intrus,
+    )
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "ID_BRANCHE_CONFLIT_INVALIDE" in codes
+    assert "TYPE_CONFLIT_INVALIDE" in codes
+
+
+# ---------------------------------------------------------------------------
+# T3 : Phases (Règle D.2)
+# ---------------------------------------------------------------------------
+
+
+def test_phase_id_unique_et_non_vide() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    # ID vide
+    p_vide = Phase(id_phase="", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+    p_2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+    rapport_vide = valider_intersection(inter, branches, voies, phases=(p_vide, p_2), conflits=conflits)
+    assert rapport_vide.est_valide is False
+    codes_vide = {e.code for e in rapport_vide.erreurs}
+    assert "ID_PHASE_VIDE" in codes_vide
+
+    # ID dupliqué
+    p_dup1 = Phase(id_phase="p_meme", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+    p_dup2 = Phase(id_phase="p_meme", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+    rapport_dup = valider_intersection(inter, branches, voies, phases=(p_dup1, p_dup2), conflits=conflits)
+    assert rapport_dup.est_valide is False
+    codes_dup = {e.code for e in rapport_dup.erreurs}
+    assert "ID_PHASE_DUPLIQUE" in codes_dup
+
+
+@pytest.mark.parametrize("ordre_invalide", [0, -1, True, False, 1.5, "1"])
+def test_phase_ordre_entier_positif_refuse_invalides_et_doublons(ordre_invalide: object) -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    # Ordre invalide
+    p_inv = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=ordre_invalide, ids_branches=("b_1", "b_2"))  # type: ignore[arg-type]
+    p_2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+    rapport_inv = valider_intersection(inter, branches, voies, phases=(p_inv, p_2), conflits=conflits)
+    assert rapport_inv.est_valide is False
+    codes_inv = {e.code for e in rapport_inv.erreurs}
+    assert "ORDRE_PHASE_INVALIDE" in codes_inv
+
+    # Ordres dupliqués
+    p_dup_o1 = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+    p_dup_o2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=1, ids_branches=("b_3",))
+    rapport_dup_o = valider_intersection(inter, branches, voies, phases=(p_dup_o1, p_dup_o2), conflits=conflits)
+    assert rapport_dup_o.est_valide is False
+    codes_dup_o = {e.code for e in rapport_dup_o.erreurs}
+    assert "ORDRE_PHASE_DUPLIQUE" in codes_dup_o
+
+
+def test_phase_id_intersection_incoherent() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    p1 = Phase(id_phase="p1", id_intersection="autre_inter", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+    p2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+    rapport = valider_intersection(inter, branches, voies, phases=(p1, p2), conflits=conflits)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "PHASE_INTERSECTION_INCOHERENTE" in codes
+
+
+def test_phase_ids_branches_valide_sans_doublon_et_sans_inconnu() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    # ids_branches vide
+    p_sans_branche = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=())
+    p2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+    rapport_vide = valider_intersection(inter, branches, voies, phases=(p_sans_branche, p2), conflits=conflits)
+    assert rapport_vide.est_valide is False
+    codes_vide = {e.code for e in rapport_vide.erreurs}
+    assert "PHASE_SANS_BRANCHE" in codes_vide
+
+    # Doublon de branche dans la même phase
+    p_branche_dup = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_1"))
+    rapport_dup = valider_intersection(inter, branches, voies, phases=(p_branche_dup, p2), conflits=conflits)
+    assert rapport_dup.est_valide is False
+    codes_dup = {e.code for e in rapport_dup.erreurs}
+    assert "BRANCHE_PHASE_DUPLIQUEE" in codes_dup
+
+    # Branche inconnue
+    p_inconnu = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_inconnue"))
+    rapport_inconnu = valider_intersection(inter, branches, voies, phases=(p_inconnu, p2), conflits=conflits)
+    assert rapport_inconnu.est_valide is False
+    codes_inconnu = {e.code for e in rapport_inconnu.erreurs}
+    assert "BRANCHE_PHASE_INCONNUE" in codes_inconnu
+
+    # ids_branches mauvais type
+    p_mauvais_type = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=123)  # type: ignore[arg-type]
+    rapport_type = valider_intersection(inter, branches, voies, phases=(p_mauvais_type, p2), conflits=conflits)
+    assert rapport_type.est_valide is False
+    codes_type = {e.code for e in rapport_type.erreurs}
+    assert "TYPE_IDS_BRANCHES_INVALIDE" in codes_type
+
+    # Élément de ids_branches de mauvais type
+    p_elem_mauvais = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=(999,))  # type: ignore[arg-type]
+    rapport_elem = valider_intersection(inter, branches, voies, phases=(p_elem_mauvais, p2), conflits=conflits)
+    assert rapport_elem.est_valide is False
+    codes_elem = {e.code for e in rapport_elem.erreurs}
+    assert "ID_BRANCHE_PHASE_INVALIDE" in codes_elem
+
+
+# ---------------------------------------------------------------------------
+# T3 : Aucune phase ne contient deux branches en conflit (Règle D.3)
+# ---------------------------------------------------------------------------
+
+
+def test_aucune_phase_ne_contient_deux_branches_en_conflit() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+
+    # Conflit déclaré entre b_1 et b_2
+    conflits = (
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_2"),
+        ConflitBranches(id_branche_a="b_2", id_branche_b="b_3"),
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_3"),
+    )
+    # Phase 1 réunit b_1 et b_2 (qui sont en conflit !)
+    p1 = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+    p2 = Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_3",))
+
+    rapport = valider_intersection(inter, branches, voies, phases=(p1, p2), conflits=conflits)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "CONFLIT_DANS_PHASE" in codes
+
+
+# ---------------------------------------------------------------------------
+# T3 : Toute branche valide ayant une voie ENTRANTE est servie (Règle D.4)
+# ---------------------------------------------------------------------------
+
+
+def test_toute_branche_avec_voie_entrante_doit_etre_servie() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    # b_3 possède une voie ENTRANTE, mais n'est pas dans les phases (seules b_1 et b_2 sont servies)
+    p1 = Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1", "b_2"))
+
+    rapport = valider_intersection(inter, branches, voies, phases=(p1,), conflits=conflits)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "BRANCHE_NON_SERVIE" in codes
+
+
+# ---------------------------------------------------------------------------
+# T3 : Toute branche valide ayant une voie ENTRANTE apparaît dans un conflit (Règle D.5)
+# ---------------------------------------------------------------------------
+
+
+def test_toute_branche_avec_voie_entrante_doit_etre_en_conflit() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    phases, _ = _creer_phases_et_conflits_valides()
+
+    # Seul conflit déclaré : entre b_1 et b_2. b_3 (ayant une voie ENTRANTE) n'a aucun conflit
+    conflits_sans_b3 = (
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_2"),
+    )
+
+    rapport = valider_intersection(inter, branches, voies, phases=phases, conflits=conflits_sans_b3)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "BRANCHE_SANS_CONFLIT" in codes
+
+
+# ---------------------------------------------------------------------------
+# T3 : phases=() vide produit AUCUNE_PHASE (Règle D.6)
+# ---------------------------------------------------------------------------
+
+
+def test_phases_vide_produit_aucune_phase() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+    _, conflits = _creer_phases_et_conflits_valides()
+
+    rapport = valider_intersection(inter, branches, voies, phases=(), conflits=conflits)
+    assert rapport.est_valide is False
+    codes = {e.code for e in rapport.erreurs}
+    assert "AUCUNE_PHASE" in codes
+
+
+# ---------------------------------------------------------------------------
+# T3 : Activation conditionnelle de l'étape "phases" et support multi-phases
+# ---------------------------------------------------------------------------
+
+
+def test_phases_none_ne_declenche_pas_etape_phases() -> None:
+    inter, branches, voies = _creer_topologie_base(nb_branches=3)
+
+    # Sans phases ni conflits (None par défaut)
+    rapport_sans = valider_intersection(inter, branches, voies)
+    assert rapport_sans.est_valide is True
+    assert "phases" not in rapport_sans.etapes_executees
+    assert rapport_sans.etapes_executees == ("identite", "topologie", "voies")
+
+    # Avec phases et conflits
+    phases, conflits = _creer_phases_et_conflits_valides()
+    rapport_avec = valider_intersection(inter, branches, voies, phases=phases, conflits=conflits)
+    assert rapport_avec.est_valide is True
+    assert "phases" in rapport_avec.etapes_executees
+    assert rapport_avec.etapes_executees == ("identite", "topologie", "voies", "phases")
+
+
+def test_carrefour_quatre_phases_est_valide() -> None:
+    """Vérifie qu'un carrefour à 4 phases (1 phase par branche) est parfaitement valide."""
+    inter, branches_4, voies_4 = _creer_topologie_base(nb_branches=4)
+
+    # 4 phases indépendantes
+    phases_4 = (
+        Phase(id_phase="p1", id_intersection="int_1", nom="P1", ordre=1, ids_branches=("b_1",)),
+        Phase(id_phase="p2", id_intersection="int_1", nom="P2", ordre=2, ids_branches=("b_2",)),
+        Phase(id_phase="p3", id_intersection="int_1", nom="P3", ordre=3, ids_branches=("b_3",)),
+        Phase(id_phase="p4", id_intersection="int_1", nom="P4", ordre=4, ids_branches=("b_4",)),
+    )
+    # Conflits croisés entre toutes les approches
+    conflits_4 = (
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_2"),
+        ConflitBranches(id_branche_a="b_1", id_branche_b="b_4"),
+        ConflitBranches(id_branche_a="b_3", id_branche_b="b_2"),
+        ConflitBranches(id_branche_a="b_3", id_branche_b="b_4"),
+    )
+
+    rapport = valider_intersection(inter, branches_4, voies_4, phases=phases_4, conflits=conflits_4)
+    assert rapport.est_valide is True
+    assert len(rapport.erreurs) == 0

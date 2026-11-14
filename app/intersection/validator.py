@@ -6,6 +6,8 @@ Règles de validation :
 - Topologie : >= 3 branches valides rattachées par id_intersection, angles finis 0..360°.
 - Voies : >= 1 voie entièrement valide par branche, unicité des id_voie,
   nom non vide, direction valide, position >= 1 et unicité par (id_branche, direction).
+- Phases & Conflits : unicité des phases/ordres/conflits, branches entrantes servies
+  et déclarées en conflit, aucune phase ne contient deux branches en conflit.
 """
 
 from __future__ import annotations
@@ -19,8 +21,10 @@ from typing import TypeGuard
 
 from app.intersection.entities import (
     Branche,
+    ConflitBranches,
     DirectionVoie,
     Intersection,
+    Phase,
     Voie,
 )
 from app.intersection.exceptions import ErreurValidationIntersection
@@ -166,6 +170,8 @@ class ValidateurIntersection:
         intersection: object,
         branches: object = (),
         voies: object = (),
+        phases: object = None,
+        conflits: object = None,
     ) -> RapportValidationIntersection:
         rapport = RapportValidationIntersection()
 
@@ -184,6 +190,18 @@ class ValidateurIntersection:
                     message="L'argument 'voies' doit être une séquence d'instances de Voie.",
                     champ="voies",
                 )
+            if phases is not None and not _est_sequence_objets(phases):
+                rapport.ajouter_erreur(
+                    code="TYPE_COLLECTION_PHASES_INVALIDE",
+                    message="L'argument 'phases' doit être une séquence d'instances de Phase.",
+                    champ="phases",
+                )
+            if conflits is not None and not _est_sequence_objets(conflits):
+                rapport.ajouter_erreur(
+                    code="TYPE_COLLECTION_CONFLITS_INVALIDE",
+                    message="L'argument 'conflits' doit être une séquence d'instances de ConflitBranches.",
+                    champ="conflits",
+                )
             return rapport
 
         ids_branches_valides = self._valider_topologie(
@@ -192,12 +210,22 @@ class ValidateurIntersection:
             rapport=rapport,
         )
 
-        self._valider_voies(
+        branches_avec_entree_valide = self._valider_voies(
             branches=branches,
             ids_branches_valides=ids_branches_valides,
             voies=voies,
             rapport=rapport,
         )
+
+        if phases is not None or conflits is not None:
+            self._valider_phases_et_conflits(
+                intersection_id_valide=intersection_id_valide,
+                ids_branches_valides=ids_branches_valides,
+                branches_avec_entree_valide=branches_avec_entree_valide,
+                phases=phases,
+                conflits=conflits,
+                rapport=rapport,
+            )
 
         return rapport
 
@@ -408,12 +436,13 @@ class ValidateurIntersection:
         ids_branches_valides: set[str],
         voies: object,
         rapport: RapportValidationIntersection,
-    ) -> None:
+    ) -> set[str]:
         rapport.enregistrer_etape("voies")
 
         compteur_voies_valides_par_branche: dict[str, int] = {
             id_b: 0 for id_b in ids_branches_valides
         }
+        branches_avec_entree_valide: set[str] = set()
 
         if not _est_sequence_objets(voies):
             rapport.ajouter_erreur(
@@ -427,7 +456,7 @@ class ValidateurIntersection:
                 compteur_voies_valides_par_branche=compteur_voies_valides_par_branche,
                 rapport=rapport,
             )
-            return
+            return branches_avec_entree_valide
 
         occurrences_ids_voies: Counter[str] = Counter()
         occurrences_positions: Counter[tuple[str, DirectionVoie, int]] = Counter()
@@ -451,7 +480,7 @@ class ValidateurIntersection:
         positions_vues: set[tuple[str, DirectionVoie, int]] = set()
 
         for idx_voie, voie in enumerate(voies):
-            self._valider_voie(
+            voie_est_valide = self._valider_voie(
                 voie=voie,
                 index_voie=idx_voie,
                 ids_branches_valides=ids_branches_valides,
@@ -462,6 +491,8 @@ class ValidateurIntersection:
                 compteur_voies_valides_par_branche=compteur_voies_valides_par_branche,
                 rapport=rapport,
             )
+            if voie_est_valide and isinstance(voie, Voie) and voie.direction == DirectionVoie.ENTRANTE:
+                branches_avec_entree_valide.add(voie.id_branche.strip())
 
         self._signaler_branches_sans_voie_valide(
             branches=branches,
@@ -469,6 +500,8 @@ class ValidateurIntersection:
             compteur_voies_valides_par_branche=compteur_voies_valides_par_branche,
             rapport=rapport,
         )
+
+        return branches_avec_entree_valide
 
     def _signaler_branches_sans_voie_valide(
         self,
@@ -510,7 +543,7 @@ class ValidateurIntersection:
         occurrences_positions: Counter[tuple[str, DirectionVoie, int]],
         compteur_voies_valides_par_branche: dict[str, int],
         rapport: RapportValidationIntersection,
-    ) -> None:
+    ) -> bool:
         prefixe_champ_voie = f"voies[{index_voie}]"
         if not isinstance(voie, Voie):
             rapport.ajouter_erreur(
@@ -518,7 +551,7 @@ class ValidateurIntersection:
                 message=f"L'élément à l'index {index_voie} de 'voies' doit être une instance de Voie.",
                 champ=prefixe_champ_voie,
             )
-            return
+            return False
 
         id_voie_valide = False
         id_v: str | None = None
@@ -619,15 +652,332 @@ class ValidateurIntersection:
 
             position_unique = occurrences_positions[cle_position] == 1
 
-        if (
+        est_voie_completement_valide = (
             id_voie_unique
             and id_b_valide
             and nom_valide
             and direction_valide
             and position_valide
             and position_unique
-        ):
+        )
+
+        if est_voie_completement_valide:
             compteur_voies_valides_par_branche[voie.id_branche.strip()] += 1
+
+        return est_voie_completement_valide
+
+    def _valider_phases_et_conflits(
+        self,
+        intersection_id_valide: str | None,
+        ids_branches_valides: set[str],
+        branches_avec_entree_valide: set[str],
+        phases: object,
+        conflits: object,
+        rapport: RapportValidationIntersection,
+    ) -> None:
+        rapport.enregistrer_etape("phases")
+
+        conflits_valides: set[tuple[str, str]] = set()
+        branches_dans_conflits: set[str] = set()
+
+        if conflits is not None:
+            if not _est_sequence_objets(conflits):
+                rapport.ajouter_erreur(
+                    code="TYPE_COLLECTION_CONFLITS_INVALIDE",
+                    message="L'argument 'conflits' doit être une séquence d'instances de ConflitBranches.",
+                    champ="conflits",
+                )
+            else:
+                paires_conflits_vues: set[tuple[str, str]] = set()
+                for idx_c, conflit in enumerate(conflits):
+                    prefixe_c = f"conflits[{idx_c}]"
+                    if not isinstance(conflit, ConflitBranches):
+                        rapport.ajouter_erreur(
+                            code="TYPE_CONFLIT_INVALIDE",
+                            message=f"L'élément à l'index {idx_c} de 'conflits' doit être une instance de ConflitBranches.",
+                            champ=prefixe_c,
+                        )
+                        continue
+
+                    a_ok = isinstance(conflit.id_branche_a, str) and bool(conflit.id_branche_a.strip())
+                    b_ok = isinstance(conflit.id_branche_b, str) and bool(conflit.id_branche_b.strip())
+
+                    if not isinstance(conflit.id_branche_a, str):
+                        rapport.ajouter_erreur(
+                            code="ID_BRANCHE_CONFLIT_INVALIDE",
+                            message="L'identifiant id_branche_a du conflit doit être une chaîne de caractères.",
+                            champ=f"{prefixe_c}.id_branche_a",
+                        )
+                    elif not conflit.id_branche_a.strip():
+                        rapport.ajouter_erreur(
+                            code="ID_BRANCHE_CONFLIT_VIDE",
+                            message="L'identifiant id_branche_a du conflit ne peut pas être vide.",
+                            champ=f"{prefixe_c}.id_branche_a",
+                        )
+
+                    if not isinstance(conflit.id_branche_b, str):
+                        rapport.ajouter_erreur(
+                            code="ID_BRANCHE_CONFLIT_INVALIDE",
+                            message="L'identifiant id_branche_b du conflit doit être une chaîne de caractères.",
+                            champ=f"{prefixe_c}.id_branche_b",
+                        )
+                    elif not conflit.id_branche_b.strip():
+                        rapport.ajouter_erreur(
+                            code="ID_BRANCHE_CONFLIT_VIDE",
+                            message="L'identifiant id_branche_b du conflit ne peut pas être vide.",
+                            champ=f"{prefixe_c}.id_branche_b",
+                        )
+
+                    if not (a_ok and b_ok):
+                        continue
+
+                    id_a = conflit.id_branche_a.strip()
+                    id_b = conflit.id_branche_b.strip()
+
+                    if id_a == id_b:
+                        rapport.ajouter_erreur(
+                            code="CONFLIT_BRANCHE_AUTO_REFERENCE",
+                            message=f"Un conflit ne peut pas référencer deux fois la même branche '{id_a}'.",
+                            champ=prefixe_c,
+                        )
+                        continue
+
+                    a_existe = id_a in ids_branches_valides
+                    b_existe = id_b in ids_branches_valides
+
+                    if not a_existe:
+                        rapport.ajouter_erreur(
+                            code="CONFLIT_BRANCHE_INCONNUE",
+                            message=f"Le conflit à l'index {idx_c} référence une branche inconnue ou invalide '{id_a}'.",
+                            champ=f"{prefixe_c}.id_branche_a",
+                        )
+                    if not b_existe:
+                        rapport.ajouter_erreur(
+                            code="CONFLIT_BRANCHE_INCONNUE",
+                            message=f"Le conflit à l'index {idx_c} référence une branche inconnue ou invalide '{id_b}'.",
+                            champ=f"{prefixe_c}.id_branche_b",
+                        )
+
+                    paire_canonique = tuple(sorted((id_a, id_b)))
+                    if paire_canonique in paires_conflits_vues:
+                        rapport.ajouter_erreur(
+                            code="CONFLIT_DUPLIQUE",
+                            message=f"Le conflit entre '{id_a}' et '{id_b}' est dupliqué.",
+                            champ=prefixe_c,
+                        )
+                    else:
+                        paires_conflits_vues.add(paire_canonique)
+                        if a_existe and b_existe:
+                            conflits_valides.add(paire_canonique)
+                            branches_dans_conflits.add(id_a)
+                            branches_dans_conflits.add(id_b)
+
+        branches_dans_phases: set[str] = set()
+
+        if phases is not None:
+            if not _est_sequence_objets(phases):
+                rapport.ajouter_erreur(
+                    code="TYPE_COLLECTION_PHASES_INVALIDE",
+                    message="L'argument 'phases' doit être une séquence d'instances de Phase.",
+                    champ="phases",
+                )
+            elif len(phases) == 0:
+                rapport.ajouter_erreur(
+                    code="AUCUNE_PHASE",
+                    message="L'intersection doit comporter au moins une phase.",
+                    champ="phases",
+                )
+            else:
+                ids_phases_vus: set[str] = set()
+                ordres_phases_vus: set[int] = set()
+
+                for idx_p, phase in enumerate(phases):
+                    prefixe_p = f"phases[{idx_p}]"
+                    if not isinstance(phase, Phase):
+                        rapport.ajouter_erreur(
+                            code="TYPE_PHASE_INVALIDE",
+                            message=f"L'élément à l'index {idx_p} de 'phases' doit être une instance de Phase.",
+                            champ=prefixe_p,
+                        )
+                        continue
+
+                    # id_phase
+                    if not isinstance(phase.id_phase, str):
+                        rapport.ajouter_erreur(
+                            code="ID_PHASE_INVALIDE",
+                            message=f"L'id_phase de la phase à l'index {idx_p} doit être une chaîne de caractères.",
+                            champ=f"{prefixe_p}.id_phase",
+                        )
+                    elif not phase.id_phase.strip():
+                        rapport.ajouter_erreur(
+                            code="ID_PHASE_VIDE",
+                            message=f"L'id_phase de la phase à l'index {idx_p} ne peut pas être vide.",
+                            champ=f"{prefixe_p}.id_phase",
+                        )
+                    else:
+                        id_p = phase.id_phase.strip()
+                        if id_p in ids_phases_vus:
+                            rapport.ajouter_erreur(
+                                code="ID_PHASE_DUPLIQUE",
+                                message=f"L'id_phase '{id_p}' est dupliqué.",
+                                champ=f"{prefixe_p}.id_phase",
+                            )
+                        else:
+                            ids_phases_vus.add(id_p)
+
+                    # ordre
+                    if isinstance(phase.ordre, bool) or not isinstance(phase.ordre, int) or phase.ordre < 1:
+                        rapport.ajouter_erreur(
+                            code="ORDRE_PHASE_INVALIDE",
+                            message=(
+                                f"L'ordre de la phase à l'index {idx_p} ({phase.ordre!r}) "
+                                "doit être un entier supérieur ou égal à 1."
+                            ),
+                            champ=f"{prefixe_p}.ordre",
+                        )
+                    else:
+                        if phase.ordre in ordres_phases_vus:
+                            rapport.ajouter_erreur(
+                                code="ORDRE_PHASE_DUPLIQUE",
+                                message=f"L'ordre de phase {phase.ordre} est dupliqué.",
+                                champ=f"{prefixe_p}.ordre",
+                            )
+                        else:
+                            ordres_phases_vus.add(phase.ordre)
+
+                    # id_intersection
+                    if (
+                        not isinstance(phase.id_intersection, str)
+                        or intersection_id_valide is None
+                        or phase.id_intersection.strip() != intersection_id_valide
+                    ):
+                        rapport.ajouter_erreur(
+                            code="PHASE_INTERSECTION_INCOHERENTE",
+                            message=(
+                                f"La phase à l'index {idx_p} référence l'intersection "
+                                f"'{phase.id_intersection}' au lieu de '{intersection_id_valide}'."
+                            ),
+                            champ=f"{prefixe_p}.id_intersection",
+                        )
+
+                    # nom
+                    nom_phase = _normaliser_chaine(phase.nom)
+                    if not isinstance(phase.nom, str):
+                        rapport.ajouter_erreur(
+                            code="NOM_PHASE_INVALIDE",
+                            message=f"Le nom de la phase à l'index {idx_p} doit être une chaîne de caractères.",
+                            champ=f"{prefixe_p}.nom",
+                        )
+                    elif not nom_phase:
+                        rapport.ajouter_erreur(
+                            code="NOM_PHASE_VIDE",
+                            message=f"Le nom de la phase à l'index {idx_p} ne peut pas être vide.",
+                            champ=f"{prefixe_p}.nom",
+                        )
+
+                    # ids_branches
+                    if not _est_sequence_objets(phase.ids_branches):
+                        rapport.ajouter_erreur(
+                            code="TYPE_IDS_BRANCHES_INVALIDE",
+                            message=(
+                                f"Le champ 'ids_branches' de la phase à l'index {idx_p} "
+                                "doit être une séquence de chaînes de caractères."
+                            ),
+                            champ=f"{prefixe_p}.ids_branches",
+                        )
+                    elif len(phase.ids_branches) == 0:
+                        rapport.ajouter_erreur(
+                            code="PHASE_SANS_BRANCHE",
+                            message=f"La phase '{phase.id_phase}' doit comporter au moins une branche.",
+                            champ=f"{prefixe_p}.ids_branches",
+                        )
+                    else:
+                        branches_phase_vues: set[str] = set()
+                        for idx_b, bid in enumerate(phase.ids_branches):
+                            if not isinstance(bid, str):
+                                rapport.ajouter_erreur(
+                                    code="ID_BRANCHE_PHASE_INVALIDE",
+                                    message=(
+                                        f"L'élément à l'index {idx_b} de ids_branches de la phase "
+                                        f"'{phase.id_phase}' doit être une chaîne de caractères."
+                                    ),
+                                    champ=f"{prefixe_p}.ids_branches[{idx_b}]",
+                                )
+                            elif not bid.strip():
+                                rapport.ajouter_erreur(
+                                    code="ID_BRANCHE_PHASE_VIDE",
+                                    message=(
+                                        f"L'identifiant de branche à l'index {idx_b} de la phase "
+                                        f"'{phase.id_phase}' ne peut pas être vide."
+                                    ),
+                                    champ=f"{prefixe_p}.ids_branches[{idx_b}]",
+                                )
+                            else:
+                                b_propre = bid.strip()
+                                if b_propre in branches_phase_vues:
+                                    rapport.ajouter_erreur(
+                                        code="BRANCHE_PHASE_DUPLIQUEE",
+                                        message=(
+                                            f"La branche '{b_propre}' est dupliquée dans la phase "
+                                            f"'{phase.id_phase}'."
+                                        ),
+                                        champ=f"{prefixe_p}.ids_branches",
+                                    )
+                                else:
+                                    branches_phase_vues.add(b_propre)
+
+                                if b_propre not in ids_branches_valides:
+                                    rapport.ajouter_erreur(
+                                        code="BRANCHE_PHASE_INCONNUE",
+                                        message=(
+                                            f"La phase '{phase.id_phase}' référence une branche "
+                                            f"inconnue ou invalide '{b_propre}'."
+                                        ),
+                                        champ=f"{prefixe_p}.ids_branches",
+                                    )
+                                else:
+                                    branches_dans_phases.add(b_propre)
+
+                        # Règle 3 : Aucune phase ne contient deux branches en conflit
+                        branches_phase_liste = sorted(branches_phase_vues)
+                        for i in range(len(branches_phase_liste)):
+                            for j in range(i + 1, len(branches_phase_liste)):
+                                paire_branche = (branches_phase_liste[i], branches_phase_liste[j])
+                                if paire_branche in conflits_valides:
+                                    rapport.ajouter_erreur(
+                                        code="CONFLIT_DANS_PHASE",
+                                        message=(
+                                            f"La phase '{phase.id_phase}' contient deux branches en conflit: "
+                                            f"'{branches_phase_liste[i]}' et '{branches_phase_liste[j]}'."
+                                        ),
+                                        champ=prefixe_p,
+                                    )
+
+        # Règle 4 : Toute branche valide ayant au moins une voie ENTRANTE valide apparaît dans au moins une phase
+        if phases is not None:
+            for b_entree in sorted(branches_avec_entree_valide):
+                if b_entree not in branches_dans_phases:
+                    rapport.ajouter_erreur(
+                        code="BRANCHE_NON_SERVIE",
+                        message=(
+                            f"La branche '{b_entree}' possède une voie entrante valide mais "
+                            "n'est desservie par aucune phase."
+                        ),
+                        champ="phases",
+                    )
+
+        # Règle 5 : Toute branche valide ayant au moins une voie ENTRANTE valide apparaît dans au moins un conflit
+        if conflits is not None:
+            for b_entree in sorted(branches_avec_entree_valide):
+                if b_entree not in branches_dans_conflits:
+                    rapport.ajouter_erreur(
+                        code="BRANCHE_SANS_CONFLIT",
+                        message=(
+                            f"La branche '{b_entree}' possède une voie entrante valide mais "
+                            "n'apparaît dans aucun conflit."
+                        ),
+                        champ="conflits",
+                    )
 
 
 def _extraire_id_branche(branche_ou_id: Branche | str) -> str:
@@ -674,6 +1024,7 @@ def _filtrer_voies_par_branche_et_direction(
 def obtenir_voies_entrantes(
     branche_ou_id: Branche | str,
     voies: Sequence[Voie],
+    direction: DirectionVoie = DirectionVoie.ENTRANTE,
 ) -> tuple[Voie, ...]:
     return _filtrer_voies_par_branche_et_direction(
         branche_ou_id=branche_ou_id,
@@ -697,6 +1048,8 @@ def valider_intersection(
     intersection: Intersection,
     branches: Sequence[Branche] = (),
     voies: Sequence[Voie] = (),
+    phases: Sequence[Phase] | None = None,
+    conflits: Sequence[ConflitBranches] | None = None,
     *,
     lever_exception: bool = False,
 ) -> RapportValidationIntersection:
@@ -704,6 +1057,8 @@ def valider_intersection(
         intersection=intersection,
         branches=branches,
         voies=voies,
+        phases=phases,
+        conflits=conflits,
     )
     if lever_exception:
         rapport.lever_si_invalide()

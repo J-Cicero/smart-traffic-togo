@@ -41,7 +41,7 @@ Identifiants : les entités utilisent des identifiants str (id_intersection, id_
 ## Ordre de réalisation
 - [x] T1 squelette FastAPI /health, config, pytest, import-linter
 - [x] T2 charger un carrefour depuis un JSON et le valider
-- [ ] T3 phases et conflits
+- [x] T3 phases et conflits
 - [ ] T3b persistance et CRUD de intersection, branche, voie (par tracking_id)
 - [ ] T4 machine à états des feux
 - [ ] T5 bornes de durée
